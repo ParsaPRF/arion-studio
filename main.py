@@ -28,7 +28,7 @@ import customtkinter as ctk
 import engine
 
 APP_NAME = "Arion Studio"
-VERSION = "1.0"
+VERSION = "0.1.0a1"
 HERE = os.path.dirname(os.path.abspath(__file__))
 SETTINGS_PATH = os.path.join(HERE, "settings.json")
 

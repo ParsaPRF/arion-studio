@@ -30,6 +30,27 @@ venv\Scripts\pip install -r requirements.txt
 venv\Scripts\python main.py
 ```
 
+## نصب نسخه‌ی آلفا (هر دو سیستم‌عامل)
+
+> نسخه فعلی: **v0.1.0-alpha** — از [صفحه‌ی Releases](https://github.com/ParsaPRF/arion-studio/releases) آرشیو مخصوص سیستم‌عامل خود را بگیرید.
+
+### 🪟 ویندوز
+
+1. فایل `arion-studio-0.1.0a1-windows.zip` را دانلود و از حالت فشرده خارج کنید
+2. **دابل‌کلیک روی `run.bat`** — خودش پایتون، venv و وابستگی‌ها را نصب و برنامه را اجرا می‌کند
+3. فقط `ffmpeg` را یک بار نصب کنید: `winget install Gyan.FFmpeg`
+
+### 🐧 لینوکس / مک
+
+```bash
+unzip arion-studio-0.1.0a1-linux.tar.gz   # یا tar xzf برای macOS
+cd arion-studio-0.1.0a1
+./install.sh        # پیش‌نیازها + venv + نصب خودکار
+arion-studio        # اجرا (یا ./run.sh از همین پوشه)
+```
+
+پیش‌نیازها: `Python 3.10+` و `ffmpeg` — نصب‌کننده‌ها خودشان چک/نصب می‌کنند.
+
 ## کلید API
 
 از تب **⚙️ تنظیمات**:
@@ -89,6 +110,27 @@ python -m venv venv
 venv\Scripts\pip install -r requirements.txt
 venv\Scripts\python main.py
 ```
+
+## Install the alpha (Windows & Linux)
+
+> Current release: **v0.1.0-alpha** — grab the archive for your OS from the [Releases page](https://github.com/ParsaPRF/arion-studio/releases).
+
+### 🪟 Windows
+
+1. Download `arion-studio-0.1.0a1-windows.zip` and extract it
+2. **Double-click `run.bat`** — it installs Python (if missing), the venv and dependencies, then launches the app
+3. Install ffmpeg once: `winget install Gyan.FFmpeg`
+
+### 🐧 Linux / macOS
+
+```bash
+tar xzf arion-studio-0.1.0a1-linux.tar.gz
+cd arion-studio-0.1.0a1
+./install.sh        # prerequisites + venv + auto-install
+arion-studio        # launch (or ./run.sh from this folder)
+```
+
+Prerequisites: `Python 3.10+` and `ffmpeg` — the installers check and install these for you.
 
 ## API keys
 
