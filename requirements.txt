@@ -1,0 +1,5 @@
+# Arion Studio — desktop dependencies
+customtkinter>=5.2.2
+python-dotenv>=1.0
+requests>=2.31
+yt-dlp>=2026.10.26

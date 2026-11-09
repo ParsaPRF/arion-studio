@@ -1,0 +1,13 @@
+# secrets / runtime artifacts
+settings.json
+keys/
+cookies/
+work/
+output/
+logs/
+data/
+.env
+__pycache__/
+*.pyc
+venv/
+.venv/
