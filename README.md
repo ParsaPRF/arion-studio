@@ -1,5 +1,7 @@
 # 🎛 Arion Studio — desktop GUI of the Arion engine
 
+![License: PolyForm Strict](https://img.shields.io/badge/license-PolyForm%20Strict-c0392b)
+
 **فارسی | [English](#-arion-studio--english)**
 
 نسخه‌ی دسکتاپِ (بدون تلگرام) موتور ربات [Arion](https://github.com/ParsaPRF/arion-bot) است؛ با رابط گرافیکی **CustomTkinter**. همون موتور زیرنویس/ترجمه/دانلود ربات، این‌بار روی پی‌سی خودتان:
@@ -52,6 +54,12 @@ ArionStudio/
 
 نکته: هسته یک‌به‌یک از ربات ارث رسیده؛ فقط `config.py` برای دسکتاپ (بدون netns/VPN و با مسیرهای ویندوزی) بازنویسی شده است. فایل‌های `settings.json`، `keys/`، `output/` و `work/` به گیت ignore شده‌اند چون ممکن است حاوی کلید یا رسانه‌ی شخصی باشند.
 
+## لایسنس
+
+© ۲۰۲۶ امیر پارسا فتح‌الهی (ParsaPRF) — تمام حقوق محفوظ است.
+
+این پروژه تحت **PolyForm Strict License 1.0.0** منتشر شده است: استفاده‌ی شخصی و غیرتجاری آزاد است، اما **کپی، توزیع، تغییر یا ساختن کار مشتق‌شده از آن مجاز نیست**. استفاده‌ی تجاری نیازمند اجازه‌ی کتبی است. متن کامل در [LICENSE](LICENSE).
+
 ---
 
 <a id="-arion-studio--english"></a>
@@ -89,3 +97,9 @@ In the **⚙️ Settings** tab: a free Groq key (`console.groq.com/keys`) and a 
 ## Where things came from
 
 The `core/` modules are taken one-to-one from the arion-bot repository; only `config.py` was re-tuned for a desktop (no netns/VPN, Windows-friendly paths). `settings.json`, `keys/`, `output/` and `work/` are git-ignored since they may hold keys or personal media.
+
+## License
+
+© 2026 Amir Parsa Fatholahi (ParsaPRF) — all rights reserved.
+
+Released under the **PolyForm Strict License 1.0.0**: personal and non-commercial use is allowed, but **copying, redistributing, modifying, or building derivative works is NOT permitted**. Commercial use requires written permission. See [LICENSE](LICENSE).
