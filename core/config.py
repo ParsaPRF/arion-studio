@@ -52,7 +52,10 @@ _or_default = (
 )
 OPENROUTER_MODELS = [m.strip() for m in os.getenv("OPENROUTER_MODELS", _or_default).split(",") if m.strip()]
 
-_gem_default = "gemini-3.5-flash,gemini-3.5-flash-lite,gemini-flash-latest"
+_gem_default = (
+    "gemini-flash-latest,gemini-3.5-flash,gemini-2.5-flash,"
+    "gemini-2.0-flash,gemini-1.5-flash"
+)
 GEMINI_MODELS = [m.strip() for m in os.getenv("GEMINI_MODELS", _gem_default).split(",") if m.strip()]
 
 # --- YouTube ----------------------------------------------------------------

@@ -24,9 +24,39 @@
 
 ## ✨ رابط کاربری
 
-- پنجره کاملاً **قابل تغییر اندازه** — کارت‌ها، نوارها و لاگ‌ها همراه پنجره کش می‌آیند
-- اسلایدر **«اندازه‌ی عناصر»** — تمام فونت‌ها و دکمه‌ها از ۷۰٪ تا ۱۶۰٪ مقیاس می‌شوند
+- پنجره کاملاً **قابل تغییر اندازه** — کارتها، نوارها و لاگها همراه پنجره کش می‌آیند
+- اسلایدر **«اندازه‌ی عناصر»** — تمام فونت‌ها و دکمه‌ها از ۷۵٪ تا ۱۵۰٪ مقیاس می‌شوند
 - تم: system / dark / light — آخرین اندازه و مقیاس پنجره و تنظیمات در `settings.json` ذخیره می‌شود
+- 💬 نوار پیشرفت هر تب: **درصد کل**، مرحله‌ی جاری، ⏱ زمان سپری‌شده، ⏳ تخمین باقی‌مانده، 🚀 سرعت و 🔑 کلید در حال استفاده
+- 📜 لاگ زمان‌دار داخل هر تب با دکمه‌های «کپی لاگ»، «پاک کردن» و «ذخیره‌ی لاگ» (در `logs/`)
+
+## ⌨️ میان‌برهای کیبورد
+
+میان‌برها از **کد فیزیکی کلید** خوانده می‌شوند، نه از حرف؛ پس وقتی صفحه‌کلید روی فارسی/عربی/سیریلیک است هم کار می‌کنند.
+
+| کلید | کار |
+|---|---|
+| `Ctrl+O` | انتخاب فایل (در تب جاری) |
+| `Ctrl+Enter` یا `F5` | شروع کار جاری |
+| `Esc` | لغو کار در حال اجرا |
+| `Ctrl+1…4` | رفتن به تب ۱ تا ۴ |
+| `Ctrl+Tab` | تب بعدی |
+| `Ctrl+C` / `Ctrl+V` / `Ctrl+X` | کپی / چسباندن / برش در هر فیلد متنی |
+| `Ctrl+A` · `Ctrl+Z` / `Ctrl+Y` | انتخاب همه · برگشت / تکرار در جعبه‌های متن |
+| `Shift+Insert` / `Ctrl+Insert` | چسباندن / کپی (ویندوز) |
+| `F1` | راهنمای میان‌برها |
+
+روی هر فیلد متنی **راست‌کلیک** کنید تا منوی «برش / کپی / چسباندن / انتخاب همه» باز شود. فونت رابط از خانواده‌هایی انتخاب می‌شود که حروف فارسی دارند (Vazirmatn → Vazir → IRANSans → Segoe UI → Tahoma → …) تا متن فارسی هرگز مربع‌نشود.
+
+## 📂 فایل‌های خروجی کجا می‌روند؟
+
+| خروجی | مسیر |
+|---|---|
+| زیرنویس / ترجمه‌ی نهایی | دقیقاً در **پوشه‌ی خروجی** که در همان تب انتخاب می‌کنید (پیش‌فرض `output/`) |
+| فایل‌های میانی (صدای فشرده، تکه‌ها، SRT هر بخش) | `work/` — بعد از پایان کار قابل پاک کردن |
+| دانلودها (ویدیو/صدا/زیرنویس/TXT) | همان پوشه‌ی «ذخیره» تب دانلود |
+| لاگ کار | با دکمه‌ی «ذخیره‌ی لاگ» در `logs/` |
+
 
 ## 📥 نصب
 
@@ -90,6 +120,11 @@ venv\Scripts\python main.py                       # ویندوز
 | خطای `No module named tkinter` در لینوکس | `sudo apt install python3-tk` (برای Fedora: `python3-tkinter`) |
 | یوتیوب خطای ۴۰۳/محدودیت می‌دهد | فایل `cookies.txt` را از تب دانلود معرفی کنید یا پروکسی بگذارید |
 | پنجره باز نمی‌شود در SSH / بدون دسکتاپ | برنامه GUI است و به نمایشگر نیاز دارد؛ روی سرور باید از VNC/X11 استفاده شود |
+| نوار پیشرفت تکان نمی‌خورد یا درصد/سرعت اشتباه است | در این نسخه رفع شده (قالب پیشرفت yt-dlp دیگر با `--print` خفه نمی‌شود و کدهای رنگی ANSI هم پارس می‌شوند). اگر باز هم دیدید، yt-dlp را به‌روز کنید: `pip install -U yt-dlp` |
+| بعد از عوض کردن زبانِ ویندوز، تایپ یا `Ctrl+V` در فیلدها کار نمی‌کند | رفع شده: میان‌برها با کد فیزیکی کلید کار می‌کنند و هر فیلد منوی راست‌کلیک دارد. اگر متن فارسی مربع نشان داده می‌شود، فونت `Vazirmatn` یا `Segoe UI` را نصب کنید |
+| فایل خروجی زیرنویس را پیدا نمی‌کنم | نتیجه در پوشه‌ی خروجیِ همان تب است (دکمه‌ی 📂 کنارِ مسیر آن را باز می‌کند)؛ فایل‌های میانی در `work/` می‌مانند |
+| ترجمه/حالت عمیق کار نمی‌کند | این دو به کلید **Gemini** نیاز دارند (نه Groq) — از تب تنظیمات کلید بگذارید و دکمه‌ی «تست» را بزنید |
+| زیرنویس خودکار یوتیوب پیدا نمی‌شود | بعضی ویدیوها هیچ زیرنویسی ندارند؛ در این حالت از تب «ساخت زیرنویس» با موتور Whisper استفاده کنید |
 
 ## 🧱 ساختار پروژه
 
@@ -103,11 +138,20 @@ arion-studio/
 │   ├── translate.py       # ترجمه SRT با Gemini
 │   ├── audio.py, srt_utils.py, keypool.py, gemini_worker.py
 │   └── config.py          # برای دسکتاپ بازنویسی شده
+├── tests/               # تست‌های رگرسیون (unittest — بدون نیاز به شبکه)
 ├── install.sh / run.sh  # نصب و اجرای لینوکس/مک
 ├── run.bat              # نصب و اجرای ویندوز
 ├── requirements.txt
 └── LICENSE
 ```
+
+### 🧪 تست‌ها
+
+```bash
+python -m unittest discover -s tests -v      # ۶۱ تست: پارس پیشرفت، SRT، خط لوله، میان‌برها، سیم‌کشی GUI
+```
+
+تست‌ها آفلاین اجرا می‌شوند (به کلید API و شبکه نیاز ندارند). بخش صوتی به `ffmpeg` نیاز دارد و تست‌های «سیم‌کشی GUI» فقط وقتی `customtkinter` نصب باشد اجرا می‌شوند (وگرنه skip). اسکریپت‌های بررسی دستی با شبکه در `tests/_smoke_*.py` هستند.
 
 > `core/` یک‌به‌یک از [arion-bot](https://github.com/ParsaPRF/arion-bot) ارث رسیده؛ فقط `config.py` برای دسکتاپ تغییر کرده (بدون netns/VPN، مسیرهای ویندوزی). پوشه‌های `settings.json`، `keys/`، `output/`، `work/` و `cookies/` حاوی داده‌های شخصی‌اند و در `.gitignore` هستند.
 
@@ -147,8 +191,38 @@ Each job runs in its own worker thread and its progress is marshalled onto the T
 ## ✨ The interface
 
 - Fully **resizable window** — cards, bars and logs stretch with the window
-- A **UI-scale slider** — every font and button scales from 70% to 160%
+- A **UI-scale slider** — every font and button scales from 75% to 150%
 - Theme: system / dark / light — window geometry, scale and settings persist in `settings.json`
+- 💬 Per-tab progress panel: **overall percent**, current stage, ⏱ elapsed, ⏳ ETA, 🚀 speed and the 🔑 key in use
+- 📜 Timestamped log per tab with "copy log", "clear" and "save log" (into `logs/`)
+
+## ⌨️ Keyboard shortcuts
+
+Shortcuts are resolved from the **physical key code**, not the character, so they keep working while the OS keyboard layout is Persian / Arabic / Cyrillic.
+
+| Key | Action |
+|---|---|
+| `Ctrl+O` | pick a file (current tab) |
+| `Ctrl+Enter` or `F5` | start the current job |
+| `Esc` | cancel the running job |
+| `Ctrl+1…4` | jump to tab 1–4 |
+| `Ctrl+Tab` | next tab |
+| `Ctrl+C` / `Ctrl+V` / `Ctrl+X` | copy / paste / cut in any text field |
+| `Ctrl+A` · `Ctrl+Z` / `Ctrl+Y` | select all · undo / redo in text boxes |
+| `Shift+Insert` / `Ctrl+Insert` | paste / copy (Windows) |
+| `F1` | shortcut help |
+
+**Right-click** any text field for a cut / copy / paste / select-all menu. The UI font is chosen from families with real Persian glyphs (Vazirmatn → Vazir → IRANSans → Segoe UI → Tahoma → …), so Persian text never turns into boxes.
+
+## 📂 Where do output files go?
+
+| Output | Location |
+|---|---|
+| Finished subtitle / translation | exactly the **output folder** chosen in that tab (default `output/`) |
+| Intermediates (compressed audio, chunks, per-chunk SRT) | `work/` — safe to delete afterwards |
+| Downloads (video/audio/subtitle/TXT) | the "save" folder of the download tab |
+| Job log | "save log" writes into `logs/` |
+
 
 ## 📥 Install
 
@@ -210,6 +284,11 @@ Tick "save to pool" to append keys to `keys/*.txt` — stack several keys and th
 | `No module named tkinter` on Linux | `sudo apt install python3-tk` (Fedora: `python3-tkinter`) |
 | YouTube 403 / restricted video | Point the download tab to a `cookies.txt` file or set a proxy |
 | Window won't open over SSH | The app is a GUI and needs a display — use VNC/X11 on servers |
+| Progress bar frozen, or wrong percent/speed | Fixed here (yt-dlp's progress template is no longer suppressed by `--print`, and ANSI colour codes no longer break parsing). If it returns, update yt-dlp: `pip install -U yt-dlp` |
+| Typing or `Ctrl+V` dies after switching keyboard language | Fixed: shortcuts use physical key codes and every field has a right-click menu. If Persian text shows as boxes, install `Vazirmatn` or use `Segoe UI` |
+| Can't find the produced subtitle | It is in the output folder of that tab (the 📂 button opens it); intermediates stay in `work/` |
+| Translation / deep mode does nothing | Both need a **Gemini** key (not Groq) — add it in Settings and press "test" |
+| No YouTube subtitle found | Some videos have none; use the Transcribe tab with the Whisper engine instead |
 
 ## 🧱 Project layout
 
@@ -223,11 +302,20 @@ arion-studio/
 │   ├── translate.py       # SRT translation with Gemini
 │   ├── audio.py, srt_utils.py, keypool.py, gemini_worker.py
 │   └── config.py          # rewritten for the desktop
+├── tests/               # regression tests (unittest — no network needed)
 ├── install.sh / run.sh  # Linux/macOS installer + launcher
 ├── run.bat              # Windows installer + launcher
 ├── requirements.txt
 └── LICENSE
 ```
+
+### 🧪 Tests
+
+```bash
+python -m unittest discover -s tests -v      # 61 tests: progress parsing, SRT, pipeline, shortcuts, GUI wiring
+```
+
+They run offline (no API keys, no network). The audio part needs `ffmpeg`, and the GUI-wiring tests run only when `customtkinter` is installed (otherwise they are skipped). Manual, network-touching checks live in `tests/_smoke_*.py`.
 
 > `core/` is taken one-to-one from [arion-bot](https://github.com/ParsaPRF/arion-bot); only `config.py` was re-tuned for the desktop (no netns/VPN, Windows-friendly paths). `settings.json`, `keys/`, `output/`, `work/` and `cookies/` hold personal data and are git-ignored.
 

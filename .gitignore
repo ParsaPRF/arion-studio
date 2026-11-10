@@ -12,3 +12,10 @@ __pycache__/
 venv/
 .venv/
 release/
+
+# local test / tooling leftovers
+tests/_artifacts/
+.deps/
+.pydeps/
+.tmp/
+.pkgs/

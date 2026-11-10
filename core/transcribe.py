@@ -79,7 +79,18 @@ class KeyRotator:
 
 # ---------------- Groq / Whisper ----------------
 
-def _post(rotator, chunk_path, data, max_attempts=None):
+def _sleep(seconds, cancel_check=None):
+    """Sleep that wakes up immediately when the user cancels."""
+    remaining = float(seconds)
+    while remaining > 0:
+        if cancel_check:
+            cancel_check()
+        step = min(0.5, remaining)
+        time.sleep(step)
+        remaining -= step
+
+
+def _post(rotator, chunk_path, data, max_attempts=None, cancel_check=None):
     n = len(rotator.keys)
     if max_attempts is None:
         max_attempts = max(5, 4 * n)
@@ -87,6 +98,8 @@ def _post(rotator, chunk_path, data, max_attempts=None):
     saw_quota = False
     retry_hint = None
     for attempt in range(1, max_attempts + 1):
+        if cancel_check:
+            cancel_check()
         key = rotator.current()
         headers = {"Authorization": f"Bearer {key}"}
         try:
@@ -95,7 +108,7 @@ def _post(rotator, chunk_path, data, max_attempts=None):
                 resp = requests.post(GROQ_URL, headers=headers, files=files, data=data, timeout=1800)
         except Exception as e:
             last_error = f"خطای شبکه: {e}"
-            time.sleep(min(30, 3 * attempt))
+            _sleep(min(30, 3 * attempt), cancel_check)
             continue
 
         if resp.status_code == 200:
@@ -117,7 +130,7 @@ def _post(rotator, chunk_path, data, max_attempts=None):
             if ra:
                 retry_hint = f"{ra} ثانیه" if ra.isdigit() else ra
             rotator.advance()
-            time.sleep(min(30, 3 * attempt))
+            _sleep(min(30, 3 * attempt), cancel_check)
             continue
         rotator.advance()
         if attempt >= max(2, 2 * n):
@@ -127,7 +140,7 @@ def _post(rotator, chunk_path, data, max_attempts=None):
     raise TranscriptionError(f"همه‌ی کلیدها/تلاشها ناموفق بودند: {last_error}")
 
 
-def _transcribe_chunk_groq(rotator, chunk_path, language, style):
+def _transcribe_chunk_groq(rotator, chunk_path, language, style, cancel_check=None):
     data = {
         "model": MODEL,
         "response_format": "verbose_json",
@@ -138,7 +151,7 @@ def _transcribe_chunk_groq(rotator, chunk_path, language, style):
     if language and language != "auto":
         data["language"] = language
 
-    resp = _post(rotator, chunk_path, data)
+    resp = _post(rotator, chunk_path, data, cancel_check=cancel_check)
     try:
         obj = resp.json()
     except ValueError:
@@ -153,7 +166,7 @@ def _transcribe_chunk_groq(rotator, chunk_path, language, style):
              "prompt": MIXED_LANG_PROMPT}
     if language and language != "auto":
         data2["language"] = language
-    resp2 = _post(rotator, chunk_path, data2)
+    resp2 = _post(rotator, chunk_path, data2, cancel_check=cancel_check)
     if resp2.text.strip():
         return resp2.text.strip() + "\n", detected
     raise TranscriptionError("پاسخ ترنسکرایب خالی بود (نه سگمنت و نه متن).")
@@ -189,13 +202,16 @@ def _gemini_call(model, key, audio_path, language, style, use_vpn):
     return r.returncode, ((r.stdout or "") + (r.stderr or "")).strip()
 
 
-def _transcribe_chunk_gemini(rotator, models, chunk_path, language, style, use_vpn):
+def _transcribe_chunk_gemini(rotator, models, chunk_path, language, style, use_vpn,
+                             cancel_check=None):
     nkeys = len(rotator.keys)
     last = "unknown"
     saw_quota = False
     retry_hint = None
     for model in (models or ["gemini-3.5-flash"]):
         for _ in range(nkeys):
+            if cancel_check:
+                cancel_check()
             key = rotator.current()
             rc, payload = _gemini_call(model, key, chunk_path, language, style, use_vpn)
             if rc == 0:
@@ -274,7 +290,7 @@ def _audio_refine_ok(orig_path, new_path):
 
 
 def _refine_chunks_with_audio(chunk_files, chunk_srt_paths, out_dir, report, keys, models,
-                              language, style, use_vpn):
+                              language, style, use_vpn, cancel_check=None):
     """Deep pass: for every audio chunk, let the model HEAR the audio and rewrite its SRT.
 
     Returns (paths_to_merge, refined_count). A chunk whose refine failed keeps its
@@ -288,6 +304,8 @@ def _refine_chunks_with_audio(chunk_files, chunk_srt_paths, out_dir, report, key
     total = len(chunk_files)
     final_paths, refined = [], 0
     for i, (audio, srt_path) in enumerate(zip(chunk_files, chunk_srt_paths), 1):
+        if cancel_check:
+            cancel_check()
         out = os.path.join(out_dir, f"refined_{i:04d}.srt")
         try:
             if os.path.exists(out):
@@ -295,10 +313,13 @@ def _refine_chunks_with_audio(chunk_files, chunk_srt_paths, out_dir, report, key
         except OSError:
             pass
         report(int(100 * (i - 1) / max(1, total)),
-               f"🔬 بازبینی شنیداری تکه {i}/{total}...", 92)
+               f"🔬 بازبینی شنیداری تکه {i}/{total}...",
+               88 + 7 * ((i - 1) / max(1, total)))
         ok = False
         for model in (models or ["gemini-3.5-flash"]):
             for _ in range(len(rot.keys)):
+                if cancel_check:
+                    cancel_check()
                 key = rot.current()
                 rc, _payload = _audio_refine_call(
                     model, key, audio, srt_path, out, language, style, use_vpn)
@@ -381,10 +402,13 @@ def _refine_srt(srt_text, work_dir, report, keys=None):
 def transcribe_file(api_keys, input_path, work_dir, language="fa", output_format="srt",
                     style=STYLE_SENTENCE, progress=None, base_name=None,
                     provider="groq", gemini_models=None, skip_existing=False, deep=False,
-                    cancel_check=None, refine_keys=None, stats=None):
+                    cancel_check=None, refine_keys=None, stats=None, final_dir=None):
     """Full pipeline with stage-accurate errors and API-key rotation.
 
     provider: "groq" (Whisper) or "gemini".
+    ``work_dir`` holds the intermediate chunks/SRTs; ``final_dir`` (defaults to
+    work_dir) receives the finished .srt/.txt so the user finds the result in
+    the folder they actually chose.
     Returns {"srt": path, "txt": path} depending on output_format.
     """
     if isinstance(api_keys, str):
@@ -408,28 +432,40 @@ def transcribe_file(api_keys, input_path, work_dir, language="fa", output_format
                 pass
 
     os.makedirs(work_dir, exist_ok=True)
+    if final_dir:
+        os.makedirs(final_dir, exist_ok=True)
     base = base_name or os.path.splitext(os.path.basename(input_path))[0]
 
     def check_cancel():
-        if cancel_check and cancel_check():
-            raise ProcessingError("لغو", "کاربر درخواست لغو داد.")
+        # ``cancel_check`` is expected to *raise* (engine.Cancelled); calling it
+        # unconditionally is what makes Stop work during slow stages.
+        if cancel_check:
+            cancel_check()
+
+    def audio_progress(stage_pct, label=None):
+        report(stage_pct, label or "🎛️ پردازش صدا…", 3 + (stage_pct or 0) * 0.07)
 
     check_cancel()
     report(0, "🎛️ فشرده‌سازی صدا...", 3)
     try:
-        audio_path = compress_to_mp3(input_path, os.path.join(work_dir, "audio.mp3"))
+        audio_path = compress_to_mp3(
+            input_path, os.path.join(work_dir, "audio.mp3"),
+            progress=audio_progress, cancel_check=check_cancel)
     except Exception as e:
         raise ProcessingError("فشرده‌سازی صدا (ffmpeg)", str(e))
     report(100, "🎛️ فشرده‌سازی صدا ✦", 10)
 
-    report(0, "✂️ تکه‌بندی صدا...", 12)
     if provider == "gemini":
         chunk_minutes = (config.GEMINI_CHUNK_MINUTES // 2) if deep else config.GEMINI_CHUNK_MINUTES
     else:
         chunk_minutes = (config.CHUNK_MINUTES // 2) if deep else config.CHUNK_MINUTES
     chunk_minutes = max(1, chunk_minutes)
     try:
-        chunks, starts = split_audio(audio_path, os.path.join(work_dir, "chunks"), max_minutes=chunk_minutes)
+        chunks, starts = split_audio(
+            audio_path, os.path.join(work_dir, "chunks"), max_minutes=chunk_minutes,
+            progress=lambda p, lbl=None: report(p, lbl or "✂️ تکه‌بندی صدا…",
+                                               10 + (p or 0) * 0.06),
+            cancel_check=check_cancel)
     except Exception as e:
         raise ProcessingError("تکه‌بندی صدا (ffmpeg)", str(e))
     if not chunks:
@@ -450,17 +486,19 @@ def transcribe_file(api_keys, input_path, work_dir, language="fa", output_format
             windows.append((starts[i], win_end))
             continue
         stage_pct = (i / max(1, total_chunks)) * 100
-        overall = 16 + (i / max(1, total_chunks)) * 76
+        overall = 16 + (i / max(1, total_chunks)) * 72
         icons = " ".join("✅" if j < i else ("🔄" if j == i else "▫️") for j in range(total_chunks))
-        label = f"🎙️ ترنسکرایب بخش {i + 1}/{total_chunks} ({engine})...\n📄 {icons}"
+        label = f"🎙️ ترنسکرایب بخش {i + 1}/{total_chunks} ({engine})\n📄 {icons}"
         report(stage_pct, label, overall)
         try:
             if provider == "gemini":
                 srt_content = _transcribe_chunk_gemini(
-                    rotator, models, chunk, locked_lang or "auto", style, gem_use_vpn)
+                    rotator, models, chunk, locked_lang or "auto", style, gem_use_vpn,
+                    cancel_check=check_cancel)
             else:
                 srt_content, detected = _transcribe_chunk_groq(
-                    rotator, chunk, locked_lang or "auto", style)
+                    rotator, chunk, locked_lang or "auto", style,
+                    cancel_check=check_cancel)
                 if locked_lang is None and detected:
                     locked_lang = detected
         except RateLimitedError as e:
@@ -482,6 +520,8 @@ def transcribe_file(api_keys, input_path, work_dir, language="fa", output_format
             f.write(srt_content)
         chunk_srt_paths.append(srt_path)
         windows.append((starts[i], win_end))
+        report(100, f"✅ بخش {i + 1}/{total_chunks} ترنسکرایب شد",
+               16 + ((i + 1) / max(1, total_chunks)) * 72)
     refined = 0
     if deep:
         if refine_keys is None:
@@ -490,39 +530,47 @@ def transcribe_file(api_keys, input_path, work_dir, language="fa", output_format
         refined_paths, refined = _refine_chunks_with_audio(
             chunks, chunk_srt_paths, os.path.join(work_dir, "refined"),
             report, refine_keys, models, language, style, refine_vpn,
+            cancel_check=check_cancel,
         )
         if refined:
             chunk_srt_paths = refined_paths
         if stats is not None:
             stats["audio_refined"] = refined
-            stats["chunk_count"] = len(chunk_srt_paths)
+    if stats is not None:
+        stats["chunk_count"] = len(chunk_srt_paths)
+        stats["chunks"] = total_chunks
+        stats["provider"] = provider
+        stats["language"] = locked_lang or language
 
     # Merge AFTER the audio-aware pass so the merge still owns the offsets/windows.
-    report(0, "🔗 ادغام تکه‌ها...", 92)
+    report(0, "🔗 ادغام تکه‌ها...", 95)
     try:
         merged = merge_srt_chunks(chunk_srt_paths, starts, windows)
     except Exception as e:
         raise ProcessingError("ادغام تکه‌ها", str(e))
+    check_cancel()
     report(100, "🔗 ادغام تکه‌ها ✦", 97)
 
     # Text-only Gemini pass: only a fallback for when the audio pass could not run.
     if deep and not refined:
-        report(30, "🔬 پاس اصلاح عمیق (Gemini)...", 96)
+        report(30, "🔬 پاس اصلاح عمیق (Gemini)...", 97)
         merged = _refine_srt(merged, work_dir, report, refine_keys)
         report(100, "🔬 پاس اصلاح عمیق ✦", 98)
 
     results = {}
+    out_dir_final = final_dir or work_dir
     try:
         if output_format in ("srt", "both"):
-            srt_out = os.path.join(work_dir, base + ".srt")
+            srt_out = os.path.join(out_dir_final, base + ".srt")
             with open(srt_out, "w", encoding="utf-8") as f:
                 f.write(merged)
             results["srt"] = srt_out
         if output_format in ("txt", "both"):
-            txt_out = os.path.join(work_dir, base + ".txt")
+            txt_out = os.path.join(out_dir_final, base + ".txt")
             with open(txt_out, "w", encoding="utf-8") as f:
                 f.write(srt_to_plain_text(merged) + "\n")
             results["txt"] = txt_out
     except Exception as e:
         raise ProcessingError("نوشتن فایل خروجی", str(e))
+    report(100, "✅ فایل خروجی نوشته شد", 99)
     return results

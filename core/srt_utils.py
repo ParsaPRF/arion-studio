@@ -1,3 +1,4 @@
+import re
 from datetime import timedelta
 
 # Subtitle styles
@@ -7,9 +8,22 @@ STYLE_WORD = "word"           # کلمه به کلمه
 
 
 def parse_srt_time(t):
-    h, m, s_ms = t.strip().split(":")
-    s, ms = s_ms.split(",")
-    return timedelta(hours=int(h), minutes=int(m), seconds=int(s), milliseconds=int(ms))
+    """Parse ``HH:MM:SS,mmm`` (also accepts '.' and ``MM:SS,mmm``)."""
+    t = (t or "").strip().replace(".", ",")
+    parts = t.split(":")
+    if len(parts) == 3:
+        h, m, s_ms = parts
+    elif len(parts) == 2:
+        h, m, s_ms = "0", parts[0], parts[1]
+    else:
+        raise ValueError(f"bad timestamp: {t!r}")
+    if "," in s_ms:
+        s, ms = s_ms.split(",", 1)
+    else:
+        s, ms = s_ms, "0"
+    ms = (ms + "000")[:3]
+    return timedelta(hours=int(h or 0), minutes=int(m or 0),
+                     seconds=int(s or 0), milliseconds=int(ms or 0))
 
 
 def format_srt_time(td):
@@ -31,6 +45,14 @@ def _items_to_srt(items):
         text = (text or "").strip()
         if start is None or end is None or not text:
             continue
+        try:
+            start, end = float(start), float(end)
+        except (TypeError, ValueError):
+            continue
+        if end <= start:
+            if end <= 0:
+                continue
+            start = max(0.0, end - 0.4)
         blocks.append(
             f"{len(blocks) + 1}\n"
             f"{seconds_to_srt_time(start)} --> {seconds_to_srt_time(end)}\n"
@@ -97,26 +119,36 @@ def build_srt(segments, words, style=STYLE_SENTENCE, max_chars=42, max_words=7):
 
 
 def merge_srt_chunks(chunk_paths, offsets, windows=None):
-    """Merge per-chunk SRT files into one.
+    """Merge per-chunk SRT files into one, sorted and overlap-free.
 
     Each block is shifted by its chunk offset. If `windows` (list of
     (start, end) seconds) is given, blocks are clamped to their chunk window so
-    small drift at chunk boundaries cannot produce overlaps.
+    small drift at chunk boundaries cannot produce overlaps. Blocks are then
+    sorted by start time and trimmed so the final file never contains
+    overlapping cues (players render those badly).
     """
-    all_blocks = []
+    entries = []
     for i, (path, offset) in enumerate(zip(chunk_paths, offsets)):
         win = windows[i] if windows else None
-        with open(path, encoding="utf-8") as f:
-            blocks = f.read().strip().split("\n\n")
-        for b in blocks:
-            lines = b.split("\n")
-            if len(lines) < 2:
+        try:
+            with open(path, encoding="utf-8", errors="ignore") as f:
+                content = f.read()
+        except OSError:
+            continue
+        for block in re.split(r"\r?\n\s*\r?\n", (content or "").strip()):
+            lines = block.split("\n")
+            timing_idx = next((k for k, ln in enumerate(lines) if "-->" in ln), None)
+            if timing_idx is None:
                 continue
             try:
-                start, end = lines[1].split(" --> ")
-                start_t = parse_srt_time(start) + timedelta(seconds=offset)
-                end_t = parse_srt_time(end) + timedelta(seconds=offset)
+                start_s, end_s = [p.strip() for p in
+                                  lines[timing_idx].split("-->", 1)]
+                start_t = parse_srt_time(start_s) + timedelta(seconds=offset)
+                end_t = parse_srt_time(end_s) + timedelta(seconds=offset)
             except ValueError:
+                continue
+            text = "\n".join(lines[timing_idx + 1:]).strip()
+            if not text:
                 continue
             if win is not None:
                 w_start = timedelta(seconds=win[0])
@@ -129,21 +161,35 @@ def merge_srt_chunks(chunk_paths, offsets, windows=None):
                     end_t = w_end
             if end_t <= start_t:
                 continue
-            lines[1] = f"{format_srt_time(start_t)} --> {format_srt_time(end_t)}"
-            all_blocks.append("\n".join(lines))
+            entries.append([start_t, end_t, text])
 
-    final = []
-    for idx, block in enumerate(all_blocks, 1):
-        lines = block.split("\n")
-        lines[0] = str(idx)
-        final.append("\n".join(lines))
-    return "\n\n".join(final) + "\n"
+    entries.sort(key=lambda e: (e[0], e[1]))
+    out, prev_end = [], None
+    for start_t, end_t, text in entries:
+        if prev_end is not None and start_t < prev_end:
+            if out and text == out[-1][2]:
+                continue  # exact duplicate from two neighbouring chunks
+            start_t = prev_end  # keep order, kill overlap
+            if end_t <= start_t:
+                continue
+        out.append([start_t, end_t, text])
+        prev_end = end_t
+
+    blocks = []
+    for idx, (start_t, end_t, text) in enumerate(out, 1):
+        blocks.append(f"{idx}\n{format_srt_time(start_t)} --> "
+                      f"{format_srt_time(end_t)}\n{text}")
+    return "\n\n".join(blocks) + ("\n" if blocks else "")
 
 
 def srt_to_plain_text(srt_content):
     lines = []
-    for block in srt_content.strip().split("\n\n"):
+    for block in re.split(r"\r?\n\s*\r?\n", (srt_content or "").strip()):
         parts = block.split("\n")
-        if len(parts) >= 3:
-            lines.append(" ".join(parts[2:]).strip())
+        timing_idx = next((k for k, ln in enumerate(parts) if "-->" in ln), None)
+        if timing_idx is None:
+            continue
+        text = " ".join(ln.strip() for ln in parts[timing_idx + 1:] if ln.strip())
+        if text.strip():
+            lines.append(text.strip())
     return "\n".join(lines)

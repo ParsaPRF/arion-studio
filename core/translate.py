@@ -1,4 +1,9 @@
-"""Translate an SRT file into a target language using Gemini (chunked by lines)."""
+"""Translate an SRT file into a target language using Gemini (chunked by lines).
+
+Progress is reported per chunk and per translated line, retries are cancellable,
+and lines the model skipped in one pass are retried in a second pass instead of
+being silently left in the source language.
+"""
 
 import os
 import re
@@ -7,7 +12,7 @@ import sys
 import tempfile
 import time
 
-from . import config
+from . import config, keypool
 from .transcribe import KeyRotator, GEMINI_HELPER
 
 CHUNK_SIZE = 40
@@ -20,7 +25,7 @@ class TranslateError(Exception):
 def parse_srt(content):
     """Return list of dicts: {index, time, text}."""
     items = []
-    for block in re.split(r"\r?\n\r?\n", (content or "").strip()):
+    for block in re.split(r"\r?\n\r?\n", (content or "").lstrip("\ufeff").strip()):
         lines = block.split("\n")
         if len(lines) < 2:
             continue
@@ -55,7 +60,19 @@ def _parse_translated(text):
     return result
 
 
-def _call_gemini_translate(chunk_text, language, style, key, model, use_vpn):
+def _terminate(proc):
+    try:
+        proc.terminate()
+        proc.wait(timeout=3)
+    except Exception:
+        try:
+            proc.kill()
+        except Exception:
+            pass
+
+
+def _call_gemini_translate(chunk_text, language, style, key, model, use_vpn,
+                           cancel_check=None):
     in_fd, in_path = tempfile.mkstemp(suffix=".txt")
     out_fd, out_path = tempfile.mkstemp(suffix=".txt")
     os.close(in_fd)
@@ -70,11 +87,29 @@ def _call_gemini_translate(chunk_text, language, style, key, model, use_vpn):
                 "--translate-in", in_path, "--translate-out", out_path,
                 "--model", model, "--key", key,
                 "--language", language, "--style", style]
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
-        if r.returncode == 0 and os.path.exists(out_path):
+        try:
+            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE,
+                                    stderr=subprocess.PIPE, text=True)
+        except FileNotFoundError as exc:
+            return 3, f"اجرای gemini_worker ناموفق: {exc}"
+        try:
+            while proc.poll() is None:
+                if cancel_check:
+                    try:
+                        cancel_check()
+                    except BaseException:
+                        _terminate(proc)
+                        raise
+                time.sleep(0.15)
+        finally:
+            try:
+                out, err = proc.communicate(timeout=5)
+            except Exception:
+                out, err = "", ""
+        if proc.returncode == 0 and os.path.exists(out_path):
             with open(out_path, encoding="utf-8") as f:
                 return 0, f.read()
-        return r.returncode, ((r.stdout or "") + (r.stderr or "")).strip()
+        return proc.returncode, ((out or "") + (err or "")).strip()
     finally:
         for p in (in_path, out_path):
             try:
@@ -83,7 +118,40 @@ def _call_gemini_translate(chunk_text, language, style, key, model, use_vpn):
                 pass
 
 
-def translate_srt(srt_text, target_language, style="casual", keys=None, progress=None):
+def _translate_chunk(chunk, target_language, style, rot, models, use_vpn,
+                     cancel_check=None, attempts=3):
+    """Translate one chunk of SRT items; returns {index: text}."""
+    prompt = "".join(f"{it['index']}\n{it['text']}\n\n" for it in chunk)
+    last = "unknown"
+    for attempt in range(1, attempts + 1):
+        if cancel_check:
+            cancel_check()
+        got = {}
+        for model in models:
+            key = rot.current()
+            rc, payload = _call_gemini_translate(
+                prompt, target_language, style, key, model, use_vpn, cancel_check)
+            if rc == 0:
+                got = _parse_translated(payload)
+                if got:
+                    return got
+                last = "پاسخ خالی از مدل"
+                rot.advance()
+                continue
+            if rc == 4:
+                last = "IP توسط گوگل بلاک شده (VPN لازم است)"
+            elif rc == 1:
+                last = (payload or "model")[-120:]
+                continue  # model unsupported: try the next model, keep the key
+            else:
+                last = (payload or f"rc={rc}")[-160:]
+                rot.advance()
+        time.sleep(min(10, 2 * attempt))
+    raise TranslateError(last)
+
+
+def translate_srt(srt_text, target_language, style="casual", keys=None, progress=None,
+                  cancel_check=None):
     """Translate srt_text; returns translated SRT text. 'keys' = list of Gemini keys."""
     items = parse_srt(srt_text)
     if not items:
@@ -91,7 +159,6 @@ def translate_srt(srt_text, target_language, style="casual", keys=None, progress
 
     if keys is None:
         try:
-            import keypool
             keys = keypool.load_keys("gemini")
         except Exception:
             keys = []
@@ -102,48 +169,48 @@ def translate_srt(srt_text, target_language, style="casual", keys=None, progress
     models = config.GEMINI_MODELS
     use_vpn = config.GEMINI_USE_VPN and bool(config.YT_NETNS)
     rot = KeyRotator(keys)
+    total_items = len(items)
 
     def report(pct, label):
-        if progress:
-            try:
-                progress(pct, label)
-            except Exception:
-                pass
+        if not progress:
+            return
+        try:
+            progress(int(max(0, min(100, pct))), label)
+        except Exception:
+            pass
 
-    chunks = [items[i:i + CHUNK_SIZE] for i in range(0, len(items), CHUNK_SIZE)]
     translated = {}
-    total = len(chunks)
-    for ci, chunk in enumerate(chunks):
-        report(int(ci / max(1, total) * 100), f"🌍 ترجمه بخش {ci + 1}/{total}...")
-        prompt = "".join(f"{it['index']}\n{it['text']}\n\n" for it in chunk)
-        got = {}
-        last = "unknown"
-        for attempt in range(1, 4):
-            for model in models:
-                key = rot.current()
-                rc, payload = _call_gemini_translate(prompt, target_language, style, key, model, use_vpn)
-                if rc == 0:
-                    got = _parse_translated(payload)
-                    if got:
-                        break
-                    last = "پاسخ خالی"
-                    rot.advance()
-                    continue
-                if rc == 4:
-                    last = "IP توسط گوگل بلاک شده (VPN لازم است)"
-                elif rc == 1:
-                    last = (payload or "model")[-120:]
-                    continue  # try next model, keep key
-                else:
-                    last = (payload or f"rc={rc}")[-160:]
-                    rot.advance()
-            if got:
-                break
-            time.sleep(3 * attempt)
-        if not got:
-            raise TranslateError(f"ترجمه بخش {ci + 1} ناموفق بود: {last}")
-        translated.update(got)
-        rot.advance()
+    pending = list(items)
+    for attempt in range(1, 4):
+        if not pending:
+            break
+        if cancel_check:
+            cancel_check()
+        chunks = [pending[i:i + CHUNK_SIZE] for i in range(0, len(pending), CHUNK_SIZE)]
+        total = len(chunks)
+        report(int(100 * len(translated) / max(1, total_items)),
+               f"🌍 ترجمه به {target_language} — پاس {attempt} · "
+               f"{len(translated)}/{total_items} خط")
+        for ci, chunk in enumerate(chunks):
+            if cancel_check:
+                cancel_check()
+            done_before = len(translated)
+            pct = 100.0 * (done_before + (ci / max(1, total)) * len(chunk)) / max(1, total_items)
+            report(int(pct),
+                   f"🌍 ترجمه بخش {ci + 1}/{total} (پاس {attempt}) — "
+                   f"{len(translated)}/{total_items} خط")
+            try:
+                got = _translate_chunk(chunk, target_language, style, rot, models,
+                                       use_vpn, cancel_check)
+            except TranslateError:
+                if not translated:
+                    raise
+                got = {}
+            translated.update(got)
+        pending = [it for it in items if it["index"] not in translated]
+        if pending:
+            report(int(100 * len(translated) / max(1, total_items)),
+                   f"🔁 {len(pending)} خط ترجمه نشد؛ تلاش دوباره ({attempt}/3)…")
 
     missing = 0
     for it in items:
@@ -152,4 +219,7 @@ def translate_srt(srt_text, target_language, style="casual", keys=None, progress
         else:
             missing += 1
     report(100, f"✅ ترجمه کامل شد ({len(items) - missing}/{len(items)} خط)")
+    if missing:
+        report(100, f"⚠️ {missing} خط ترجمه نشد و به زبان اصلی ماند "
+                    f"({len(items) - missing}/{len(items)} خط ترجمه شد)")
     return build_srt(items)
