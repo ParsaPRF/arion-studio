@@ -22,7 +22,8 @@ import re
 import threading
 import time
 
-from core import config, downloader, keypool, srt_utils, transcribe, translate
+from core import (config, downloader, keypool, openrouter, srt_utils,
+                  transcribe, translate)
 from i18n import t
 
 # --- Choice tables (mirrors of the bot's menus) ------------------------------
@@ -47,6 +48,13 @@ SUBTITLE_STYLES = [
 PROVIDERS = [
     ("groq", "engine.provider.groq"),
     ("gemini", "engine.provider.gemini"),
+]
+
+# Who reviews the transcript in deep mode.  Gemini can hear the audio; the free
+# OpenRouter models review the text only.
+DEEP_ENGINES = [
+    ("gemini", "engine.deep.gemini"),
+    ("openrouter", "engine.deep.openrouter"),
 ]
 
 DL_AUDIO_QUALITIES = [
@@ -263,6 +271,29 @@ def gemini_keys(user_key=None):
     return out
 
 
+def openrouter_keys(user_key=None):
+    """The user's saved OpenRouter key first, then the pool, then .env."""
+    keys = []
+    if user_key:
+        keys.append(user_key.strip())
+    keys += keypool.load_keys("openrouter")
+    if config.DEFAULT_OPENROUTER_API_KEY:
+        keys.append(config.DEFAULT_OPENROUTER_API_KEY)
+    seen, out = set(), []
+    for k in keys:
+        if k and k not in seen:
+            seen.add(k)
+            out.append(k)
+    return out
+
+
+def deep_keys(engine="gemini", openrouter_key=None, gemini_key=None):
+    """The keys of the engine chosen to review the transcript in deep mode."""
+    if (engine or "gemini") == "openrouter":
+        return openrouter_keys(openrouter_key)
+    return gemini_keys(gemini_key)
+
+
 def save_key(provider, key):
     added, total = keypool.add_key(key, provider)
     return added, total
@@ -283,7 +314,7 @@ def _safe_stem(path):
 
 # --- Environment checks -------------------------------------------------------
 
-def environment_status(groq_key=None, gemini_key=None):
+def environment_status(groq_key=None, gemini_key=None, openrouter_key=None):
     """Facts the GUI shows in its log/settings: ffmpeg, yt-dlp, folders.
 
     The keys saved in settings.json are passed in so the counts describe what
@@ -298,6 +329,7 @@ def environment_status(groq_key=None, gemini_key=None):
         "work_dir": config.WORK_DIR,
         "keys_groq": len(groq_keys(groq_key)),
         "keys_gemini": len(gemini_keys(gemini_key)),
+        "keys_openrouter": len(openrouter_keys(openrouter_key)),
     }
 
 
@@ -306,7 +338,8 @@ def environment_status(groq_key=None, gemini_key=None):
 def transcribe_file(job: Job, api_keys, input_path, out_dir, language="auto",
                     output_format="srt", style=srt_utils.STYLE_SENTENCE,
                     provider="groq", deep=False, refine_keys=None, cookies=None,
-                    progress_start=0.0, progress_span=100.0):
+                    progress_start=0.0, progress_span=100.0,
+                    refine_provider="gemini", refine_models=None):
     """Run the full subtitle pipeline on a local media file. Returns dict of paths."""
     job._check()
     if not api_keys:
@@ -339,6 +372,8 @@ def transcribe_file(job: Job, api_keys, input_path, out_dir, language="auto",
         cancel_check=job._check,
         refine_keys=refine_keys,
         final_dir=out_dir,
+        refine_provider=refine_provider,
+        refine_models=refine_models,
     )
     for key, path in (result or {}).items():
         job.log(t("engine.log.artifact_saved", kind=key.upper(), path=path))
@@ -349,7 +384,8 @@ def transcribe_file(job: Job, api_keys, input_path, out_dir, language="auto",
 def transcribe_youtube(job: Job, api_keys, url, out_dir, language="auto",
                        output_format="srt", style=srt_utils.STYLE_SENTENCE,
                        provider="groq", deep=False, refine_keys=None,
-                       cookies=None):
+                       cookies=None, refine_provider="gemini",
+                       refine_models=None):
     """Download the YouTube audio track first, then transcribe it."""
     job._check()
     os.makedirs(out_dir, exist_ok=True)
@@ -367,7 +403,8 @@ def transcribe_youtube(job: Job, api_keys, url, out_dir, language="auto",
     return transcribe_file(
         job, api_keys, audio_path, out_dir, language=language,
         output_format=output_format, style=style, provider=provider, deep=deep,
-        refine_keys=refine_keys, progress_start=16, progress_span=84)
+        refine_keys=refine_keys, progress_start=16, progress_span=84,
+        refine_provider=refine_provider, refine_models=refine_models)
 
 
 # --- 2) YouTube downloads -------------------------------------------------------
@@ -491,6 +528,11 @@ def test_api_key(provider, key):
             if r.status_code == 200:
                 return True, t("engine.key.groq_ok")
             return False, t("engine.key.groq_http", code=r.status_code, body=r.text[:200])
+        if provider == "openrouter":
+            ok, detail = openrouter.check_key(key)
+            if ok:
+                return True, t("engine.key.openrouter_ok", extra=detail).strip()
+            return False, t("engine.key.openrouter_http", body=detail)
         r = requests.get("https://generativelanguage.googleapis.com/v1beta/models",
                          params={"key": key}, timeout=25)
         if r.status_code == 200:

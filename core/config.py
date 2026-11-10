@@ -17,6 +17,7 @@ PROJECT_DIR = os.path.dirname(BASE_DIR)
 # --- Keys -------------------------------------------------------------------
 # Optional server-style defaults; the GUI settings are the primary source.
 DEFAULT_GROQ_API_KEY = os.getenv("GROQ_API_KEY", "").strip()
+DEFAULT_OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "").strip()
 
 # --- Folders ----------------------------------------------------------------
 _work = os.getenv("WORK_DIR", "") or os.path.join(PROJECT_DIR, "work")
@@ -45,12 +46,20 @@ SERVER_KEYS_FILE = os.getenv("SERVER_KEYS_FILE") or os.path.join(KEYS_DIR, "groq
 GEMINI_KEYS_FILE = os.getenv("GEMINI_KEYS_FILE") or os.path.join(KEYS_DIR, "gemini_keys.txt")
 OPENROUTER_KEYS_FILE = os.getenv("OPENROUTER_KEYS_FILE") or os.path.join(KEYS_DIR, "openrouter_keys.txt")
 
+# Free models only, strongest first: the deep pass reviews an existing SRT, so a
+# long-context instruction model is all it needs.  Override with
+# OPENROUTER_MODELS="vendor/model:free,..." (paid ids work too, they just cost).
 _or_default = (
-    "google/gemma-4-31b-it:free,google/gemma-4-26b-a4b-it:free,"
     "nvidia/nemotron-3-ultra-550b-a55b:free,"
-    "google/gemma-4-31b-it,google/gemma-4-26b-a4b-it,nvidia/nemotron-3-ultra-550b-a55b"
+    "nvidia/nemotron-3.5-lightning:free,"
+    "google/gemma-4-31b-it:free,"
+    "google/gemma-4-26b-a4b-it:free,"
+    "dots-studio/dots-3-note-preview:free,"
+    "xingchen-agi/xing4.0-29b-a4b:free"
 )
 OPENROUTER_MODELS = [m.strip() for m in os.getenv("OPENROUTER_MODELS", _or_default).split(",") if m.strip()]
+OPENROUTER_BASE = (os.getenv("OPENROUTER_BASE", "https://openrouter.ai/api/v1").strip().rstrip("/"))
+OPENROUTER_TIMEOUT = int(os.getenv("OPENROUTER_TIMEOUT", "600"))
 
 _gem_default = (
     "gemini-flash-latest,gemini-3.5-flash,gemini-2.5-flash,"

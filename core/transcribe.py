@@ -10,6 +10,7 @@ from i18n import t
 
 from . import config
 from . import keypool
+from . import openrouter
 from .audio import compress_to_mp3, get_duration, split_audio
 from .srt_utils import STYLE_SENTENCE, build_srt, merge_srt_chunks, srt_to_plain_text
 
@@ -361,8 +362,44 @@ def _gemini_refine_call(model, key, in_path, out_path, use_vpn):
     return r.returncode
 
 
-def _refine_srt(srt_text, work_dir, report, keys=None):
-    """Deep-mode second pass: polish the SRT text with Gemini, keeping timings."""
+def _refine_srt_openrouter(srt_text, report, keys, models=None):
+    """Deep-mode reviewer on a free OpenRouter model (text only, no audio).
+
+    Every free model is tried in order, and each one is retried with the next key
+    when it reports a rate limit or a rejected key.  The transcript is returned
+    unchanged if nothing succeeds, so a reviewer can never lose text.
+    """
+    keys = [k for k in (keys or []) if k and k.strip()]
+    if not keys:
+        return srt_text
+    rot = KeyRotator(keys)
+    for model in (models or openrouter.models()):
+        for _ in range(len(rot.keys)):
+            status, payload = openrouter.refine(srt_text, rot.current(), model)
+            if status == openrouter.OK:
+                if report:
+                    report(100, t("tr.progress.deep_refine_model", model=model), 98)
+                return payload
+            if status == openrouter.MODEL:
+                break                 # this model is unavailable: next one
+            rot.advance()             # rate limit / bad key / network: next key
+    return srt_text
+
+
+def _refine_srt(srt_text, work_dir, report, keys=None, provider="gemini",
+                models=None):
+    """Deep-mode second pass: polish the SRT text, keeping timings.
+
+    ``provider`` picks the reviewer: ``gemini`` (text, via the helper process) or
+    ``openrouter`` (a free text-only model, in-process).
+    """
+    if (provider or "gemini") == "openrouter":
+        if keys is None:
+            try:
+                keys = keypool.load_keys("openrouter")
+            except Exception:
+                keys = []
+        return _refine_srt_openrouter(srt_text, report, keys, models)
     if keys is None:
         try:
             keys = keypool.load_keys("gemini")
@@ -405,7 +442,8 @@ def _refine_srt(srt_text, work_dir, report, keys=None):
 def transcribe_file(api_keys, input_path, work_dir, language="fa", output_format="srt",
                     style=STYLE_SENTENCE, progress=None, base_name=None,
                     provider="groq", gemini_models=None, skip_existing=False, deep=False,
-                    cancel_check=None, refine_keys=None, stats=None, final_dir=None):
+                    cancel_check=None, refine_keys=None, stats=None, final_dir=None,
+                    refine_provider="gemini", refine_models=None):
     """Full pipeline with stage-accurate errors and API-key rotation.
 
     provider: "groq" (Whisper) or "gemini".
@@ -530,24 +568,32 @@ def transcribe_file(api_keys, input_path, work_dir, language="fa", output_format
         report(100, t("tr.progress.chunk", index=i + 1, total=total_chunks),
                16 + ((i + 1) / max(1, total_chunks)) * 72)
     refined = 0
+    refine_provider = (refine_provider or "gemini").strip().lower()
     if deep:
-        if refine_keys is None:
-            refine_keys = list(api_keys) if provider == "gemini" else keypool.load_keys("gemini")
-        refine_keys = [k for k in refine_keys if k]
-        refined_paths, refined = _refine_chunks_with_audio(
-            chunks, chunk_srt_paths, os.path.join(work_dir, "refined"),
-            report, refine_keys, models, language, style, refine_vpn,
-            cancel_check=check_cancel,
-        )
-        if refined:
-            chunk_srt_paths = refined_paths
-        if stats is not None:
-            stats["audio_refined"] = refined
+        if refine_provider != "openrouter":
+            # Gemini can listen to each chunk; the free OpenRouter models cannot,
+            # so they review the merged text further down instead.
+            if refine_keys is None:
+                refine_keys = (list(api_keys) if provider == "gemini"
+                               else keypool.load_keys("gemini"))
+            refine_keys = [k for k in refine_keys if k]
+            refined_paths, refined = _refine_chunks_with_audio(
+                chunks, chunk_srt_paths, os.path.join(work_dir, "refined"),
+                report, refine_keys, models, language, style, refine_vpn,
+                cancel_check=check_cancel,
+            )
+            if refined:
+                chunk_srt_paths = refined_paths
+            if stats is not None:
+                stats["audio_refined"] = refined
+        elif refine_keys is None:
+            refine_keys = keypool.load_keys("openrouter")
     if stats is not None:
         stats["chunk_count"] = len(chunk_srt_paths)
         stats["chunks"] = total_chunks
         stats["provider"] = provider
         stats["language"] = locked_lang or language
+        stats["refine_provider"] = refine_provider if deep else None
 
     # Merge AFTER the audio-aware pass so the merge still owns the offsets/windows.
     report(0, t("tr.progress.merging"), 95)
@@ -558,10 +604,12 @@ def transcribe_file(api_keys, input_path, work_dir, language="fa", output_format
     check_cancel()
     report(100, t("tr.progress.merging_done"), 97)
 
-    # Text-only Gemini pass: only a fallback for when the audio pass could not run.
-    if deep and not refined:
+    # Text pass: the OpenRouter reviewer always works here; Gemini only as a
+    # fallback for when its audio pass could not run.
+    if deep and (refined == 0 or refine_provider == "openrouter"):
         report(30, t("tr.progress.deep_refine"), 97)
-        merged = _refine_srt(merged, work_dir, report, refine_keys)
+        merged = _refine_srt(merged, work_dir, report, refine_keys,
+                             provider=refine_provider, models=refine_models)
         report(100, t("tr.progress.deep_refine_done"), 98)
 
     results = {}

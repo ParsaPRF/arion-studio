@@ -11,7 +11,8 @@
 The **desktop edition** of the engine behind the [Arion](https://github.com/ParsaPRF/arion-bot) Telegram bot, wrapped in a **[CustomTkinter](https://github.com/TomSchimansky/CustomTkinter)** GUI. No Telegram — the same subtitle/download/translate engine, running locally on your PC:
 
 - 🎬 **Subtitles (SRT / TXT)** from a local media file or a YouTube link
-  - Engines: ⚡ Groq (Whisper) or ✨ Gemini with a deep-listen refinement mode
+  - Engines: ⚡ Groq (Whisper) or ✨ Gemini
+  - Deep review pass: ✨ Gemini (listens to the audio) or the free OpenRouter models (text only) — the second model fixes spelling, punctuation and line breaks
   - Languages: auto / Persian / English / German — three styles: sentence, short lines, word-by-word
   - Live progress bar + stage log + cancel; multiple keys rotate automatically on rate limits
 - 📺 **YouTube downloads**
@@ -106,7 +107,8 @@ In the **⚙️ Settings** tab:
 | Service | Used for | Get a key |
 |---|---|---|
 | Groq (Whisper) | speech recognition (free tier) | [console.groq.com/keys](https://console.groq.com/keys) |
-| Gemini (Google AI Studio) | translation, deep-listen mode | [aistudio.google.com/apikey](https://aistudio.google.com/apikey) |
+| Gemini (Google AI Studio) | translation, deep review (audio-aware) | [aistudio.google.com/apikey](https://aistudio.google.com/apikey) |
+| OpenRouter | deep review with free models (`*:free`) | [openrouter.ai/keys](https://openrouter.ai/keys) |
 
 Tick "save to pool" to append keys to `keys/*.txt` — stack several keys and they rotate automatically when one hits a rate limit.
 
@@ -122,7 +124,9 @@ Tick "save to pool" to append keys to `keys/*.txt` — stack several keys and th
 | Progress bar frozen, or wrong percent/speed | Fixed here (yt-dlp's progress template is no longer suppressed by `--print`, and ANSI colour codes no longer break parsing). If it returns, update yt-dlp: `pip install -U yt-dlp` |
 | Typing or `Ctrl+V` dies after switching keyboard language | Fixed: shortcuts use physical key codes and every field has a right-click menu. If Persian text shows as boxes, install `Vazirmatn` or use `Segoe UI` |
 | Can't find the produced subtitle | It is in the output folder of that tab (the 📂 button opens it); intermediates stay in `work/` |
-| Translation / deep mode does nothing | Both need a **Gemini** key (not Groq) — add it in Settings and press "test" |
+| Translation does nothing | Translation runs on **Gemini** (a Groq key cannot translate) — add a Gemini key in Settings and press "test" |
+| Deep review does nothing | The reviewer needs its own key: a **Gemini** key, or an **OpenRouter** key for the free models. Check which reviewer is selected in Settings |
+| Deep review with OpenRouter returns the same text | Every free model hit its rate limit or was unavailable; the log names what was tried. Try again later or pick Gemini |
 | No YouTube subtitle found | Some videos have none; use the Transcribe tab with the Whisper engine instead |
 
 ## 🧱 Project layout
@@ -136,6 +140,7 @@ arion-studio/
 │   ├── transcribe.py      # subtitle pipeline (Groq/Gemini + key rotation)
 │   ├── downloader.py      # video/audio/subtitle/metadata downloads
 │   ├── translate.py       # SRT translation with Gemini
+│   ├── openrouter.py      # free OpenRouter models as the deep reviewer
 │   ├── audio.py, srt_utils.py, keypool.py, gemini_worker.py
 │   └── config.py          # rewritten for the desktop
 ├── tests/               # regression tests (unittest — no network needed)
@@ -148,7 +153,7 @@ arion-studio/
 ### 🧪 Tests
 
 ```bash
-python -m unittest discover -s tests -v      # 95 tests: progress parsing, SRT, pipeline, shortcuts, GUI wiring
+python -m unittest discover -s tests -v      # 117 tests: progress parsing, SRT, pipeline, shortcuts, GUI wiring
 ```
 
 They run offline (no API keys, no network). The audio part needs `ffmpeg`, and the GUI-wiring tests run only when `customtkinter` is installed (otherwise they are skipped). Manual, network-touching checks live in `tests/_smoke_*.py`.
@@ -176,7 +181,8 @@ Released under the **[PolyForm Strict License 1.0.0](LICENSE)**: personal and no
 نسخه‌ی دسکتاپِ موتورِ ربات [Arion](https://github.com/ParsaPRF/arion-bot) است؛ ساخته‌شده با رابط گرافیکی **[CustomTkinter](https://github.com/TomSchimansky/CustomTkinter)**. همان موتور زیرنویس/ترجمه/دانلودِ ربات — این‌بار بدون تلگرام و روی کامپیوتر خودتان:
 
 - 🎬 **ساخت زیرنویس (SRT / TXT)** از ویدیو، ویس یا لینک یوتیوب
-  - موتورهای تشخیص: ⚡ Groq (Whisper) یا ✨ Gemini با حالت عمیق
+  - موتورهای تشخیص: ⚡ Groq (Whisper) یا ✨ Gemini
+  - بازبینی عمیق: ✨ Gemini (صدا را می‌شنود) یا مدل‌های رایگان OpenRouter (فقط متن) — مدل دوم غلط املایی، نشانه‌گذاری و مرز جمله‌ها را درست می‌کند
   - زبان: تشخیص خودکار، فارسی، انگلیسی، آلمانی — سه استایل: جمله‌ای، خطوط کوتاه، کلمه‌به‌کلمه
   - نوار پیشرفت زنده، لاگ مراحل، امکان لغو کار؛ چند کلید = چرخش خودکار هنگام محدودیت
 - 📺 **دانلود از یوتیوب**
@@ -273,7 +279,8 @@ venv\Scripts\python main.py                       # ویندوز
 | سرویس | کاربرد | دریافت کلید |
 |---|---|---|
 | Groq (Whisper) | تشخیص گفتار (رایگان) | [console.groq.com/keys](https://console.groq.com/keys) |
-| Gemini (Google AI Studio) | ترجمه، حالت عمیق | [aistudio.google.com/apikey](https://aistudio.google.com/apikey) |
+| Gemini (Google AI Studio) | ترجمه، بازبینی عمیق (با شنیدن صدا) | [aistudio.google.com/apikey](https://aistudio.google.com/apikey) |
+| OpenRouter | بازبینی عمیق با مدل‌های رایگان (`*:free`) | [openrouter.ai/keys](https://openrouter.ai/keys) |
 
 اگر تیک «ذخیره در استخر» را بزنید، کلیدها در `keys/*.txt` نگه داشته می‌شوند — می‌توانید چند کلید بگذارید تا هنگام محدودشدن یکی، به‌طور خودکار بعدی استفاده شود.
 
@@ -289,7 +296,9 @@ venv\Scripts\python main.py                       # ویندوز
 | نوار پیشرفت تکان نمی‌خورد یا درصد/سرعت اشتباه است | در این نسخه رفع شده (قالب پیشرفت yt-dlp دیگر با `--print` خفه نمی‌شود و کدهای رنگی ANSI هم پارس می‌شوند). اگر باز هم دیدید، yt-dlp را به‌روز کنید: `pip install -U yt-dlp` |
 | بعد از عوض کردن زبانِ ویندوز، تایپ یا `Ctrl+V` در فیلدها کار نمی‌کند | رفع شده: میان‌برها با کد فیزیکی کلید کار می‌کنند و هر فیلد منوی راست‌کلیک دارد. اگر متن فارسی مربع نشان داده می‌شود، فونت `Vazirmatn` یا `Segoe UI` را نصب کنید |
 | فایل خروجی زیرنویس را پیدا نمی‌کنم | نتیجه در پوشه‌ی خروجیِ همان تب است (دکمه‌ی 📂 کنارِ مسیر آن را باز می‌کند)؛ فایل‌های میانی در `work/` می‌مانند |
-| ترجمه/حالت عمیق کار نمی‌کند | این دو به کلید **Gemini** نیاز دارند (نه Groq) — از تب تنظیمات کلید بگذارید و دکمه‌ی «تست» را بزنید |
+| ترجمه کار نمی‌کند | ترجمه با **Gemini** انجام می‌شود (کلید Groq برای ترجمه کار نمی‌کند) — از تب تنظیمات کلید Gemini بگذارید و «تست» را بزنید |
+| بازبینی عمیق کار نمی‌کند | بازبین کلید خودش را می‌خواهد: کلید **Gemini**، یا کلید **OpenRouter** برای مدل‌های رایگان. در تنظیمات ببینید کدام بازبین انتخاب شده |
+| بازبینی عمیق با OpenRouter متن را عوض نمی‌کند | همه‌ی مدل‌های رایگان به محدودیت نرخ خورده‌اند یا در دسترس نبودند؛ لاگ می‌گوید چه امتحان شده. بعداً دوباره امتحان کنید یا Gemini را انتخاب کنید |
 | زیرنویس خودکار یوتیوب پیدا نمی‌شود | بعضی ویدیوها هیچ زیرنویسی ندارند؛ در این حالت از تب «ساخت زیرنویس» با موتور Whisper استفاده کنید |
 
 ## 🧱 ساختار پروژه
@@ -303,6 +312,7 @@ arion-studio/
 │   ├── transcribe.py      # خط لوله زیرنویس (Groq/Gemini + چرخش کلید)
 │   ├── downloader.py      # دانلود ویدیو/صدا/زیرنویس/مشخصات
 │   ├── translate.py       # ترجمه SRT با Gemini
+│   ├── openrouter.py      # free OpenRouter models as the deep reviewer
 │   ├── audio.py, srt_utils.py, keypool.py, gemini_worker.py
 │   └── config.py          # برای دسکتاپ بازنویسی شده
 ├── tests/               # تست‌های رگرسیون (unittest — بدون نیاز به شبکه)
@@ -315,7 +325,7 @@ arion-studio/
 ### 🧪 تست‌ها
 
 ```bash
-python -m unittest discover -s tests -v      # ۹۵ تست: پارس پیشرفت، SRT، خط لوله، میان‌برها، سیم‌کشی GUI
+python -m unittest discover -s tests -v      # ۱۱۷ تست: پارس پیشرفت، SRT، خط لوله، میان‌برها، سیم‌کشی GUI
 ```
 
 تست‌ها آفلاین اجرا می‌شوند (به کلید API و شبکه نیاز ندارند). بخش صوتی به `ffmpeg` نیاز دارد و تست‌های «سیم‌کشی GUI» فقط وقتی `customtkinter` نصب باشد اجرا می‌شوند (وگرنه skip). اسکریپت‌های بررسی دستی با شبکه در `tests/_smoke_*.py` هستند.

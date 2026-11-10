@@ -95,16 +95,22 @@ class GuiFlowTests(unittest.TestCase):
             tab._job = None
             tab.set_running(False)
             tab.reset_progress()
+            # The app instance is shared by the whole class, so a checkbox left
+            # ticked would leak deep mode into the next test.
+            if hasattr(tab, "deep_var"):
+                tab.deep_var.set(False)
         m = self.main
         self._saved = {name: getattr(m.engine, name) for name in (
-            "groq_keys", "gemini_keys", "environment_status", "transcribe_file",
+            "groq_keys", "gemini_keys", "openrouter_keys",
+            "environment_status", "transcribe_file",
             "transcribe_youtube", "download_media", "download_subtitles",
             "download_info_txt", "translate_srt_file")}
         m.engine.groq_keys = lambda *a, **k: ["groq-key"]
         m.engine.gemini_keys = lambda *a, **k: ["gem-key"]
+        m.engine.openrouter_keys = lambda *a, **k: ["or-key"]
         m.engine.environment_status = lambda *a, **k: {
             "ffmpeg": True, "ytdlp": True, "work_dir": self.tmp,
-            "keys_groq": 1, "keys_gemini": 1}
+            "keys_groq": 1, "keys_gemini": 1, "keys_openrouter": 1}
         self.msgbox.infos.clear()
         self.msgbox.errors.clear()
         self.msgbox.warnings.clear()
@@ -210,6 +216,75 @@ class GuiFlowTests(unittest.TestCase):
         self.assertIn("Groq", text, "the message should point at the other engine")
         self.assertGreater(len(text), 60,
                            "the message should explain the alternative, not just refuse")
+
+    def test_settings_saves_the_openrouter_key(self):
+        tab = self._settings_tab()
+        tab.or_var.set("sk-or-v1-secret")
+        tab.save_keys_var.set(False)
+
+        tab._save()
+
+        self.assertEqual(self.app.settings["openrouter_key"], "sk-or-v1-secret")
+        self.assertEqual(tab.or_var.get(), "", "the field should clear after saving")
+
+    def test_settings_saves_the_deep_review_engine(self):
+        tab = self._settings_tab()
+        tab.deep_menu.set(self._label(self.main.engine.DEEP_ENGINES, "openrouter"))
+
+        tab._save()
+
+        self.assertEqual(self.app.settings["deep_engine"], "openrouter")
+        tab.deep_menu.set(self._label(self.main.engine.DEEP_ENGINES, "gemini"))
+        tab._save()
+        self.assertEqual(self.app.settings["deep_engine"], "gemini")
+
+    def test_deep_review_with_openrouter_passes_the_reviewer(self):
+        self.app.settings["deep_engine"] = "openrouter"
+        tab = self._prepare_transcribe_file()
+        tab.deep_var.set(True)
+        self._stub("transcribe_file", {"srt": os.path.join(self.tmp, "d.srt")})
+
+        tab.trigger_start()
+        self._settle(tab)
+
+        call = self.calls.get("transcribe_file")
+        self.assertIsNotNone(call, "engine.transcribe_file was never called")
+        self.assertTrue(call["kwargs"]["deep"])
+        self.assertEqual(call["kwargs"]["refine_provider"], "openrouter")
+        self.assertEqual(call["kwargs"]["refine_keys"], ["or-key"])
+        self.assertTrue(call["kwargs"]["refine_models"],
+                        "the free model list must reach the engine")
+
+    def test_deep_review_without_an_openrouter_key_explains(self):
+        self.main.engine.openrouter_keys = lambda *a, **k: []
+        self.app.settings["deep_engine"] = "openrouter"
+        tab = self._prepare_transcribe_file()
+        tab.deep_var.set(True)
+        self._stub("transcribe_file", {"srt": os.path.join(self.tmp, "d.srt")})
+
+        tab.trigger_start()
+        self._settle(tab)
+
+        self.assertIsNone(self.calls.get("transcribe_file"))
+        self.assertTrue(self.msgbox.errors, "no explanation was shown")
+        text = str(self.msgbox.errors[-1][-1])
+        self.assertIn("OpenRouter", text)
+
+    def test_deep_review_with_gemini_still_works_for_a_groq_transcript(self):
+        self.app.settings["deep_engine"] = "gemini"
+        tab = self._prepare_transcribe_file()
+        tab.prov_menu.set(self._label(self.main.engine.PROVIDERS, "groq"))
+        tab.deep_var.set(True)
+        self._stub("transcribe_file", {"srt": os.path.join(self.tmp, "d.srt")})
+
+        tab.trigger_start()
+        self._settle(tab)
+
+        call = self.calls.get("transcribe_file")
+        self.assertIsNotNone(call, "deep mode was blocked for a Groq transcript")
+        self.assertTrue(call["kwargs"]["deep"])
+        self.assertEqual(call["kwargs"]["refine_provider"], "gemini")
+        self.assertEqual(call["kwargs"]["refine_keys"], ["gem-key"])
 
     def test_transcribe_file_flow(self):
         tab = self.app.tabs["transcribe"]
@@ -643,13 +718,20 @@ class GuiFlowTests(unittest.TestCase):
                 walk(child)
 
         walk(tab)
-        self.assertEqual(len(found), 2, "expected the two 'Get a ...' links")
+        self.assertGreaterEqual(len(found), 2, "expected the 'Get a ...' links")
         for button in found:
             # CTkButton.bind() forwards to its canvas, which is what receives
             # the pointer event, so check the binding there.
             canvas = getattr(button, "_canvas", button)
             self.assertTrue(canvas.bind("<ButtonRelease-1>"),
                             "link canvas has no release binding")
+            # The whole row must be a target too: a tap that misses the text by
+            # a few pixels still has to open the page.  binding it on the row's
+            # raw canvas is what makes that work (CTkFrame.bind drops it).
+            row_canvas = getattr(button.master, "_canvas", None)
+            self.assertIsNotNone(row_canvas, "link row has no canvas")
+            self.assertTrue(row_canvas.bind("<ButtonRelease-1>"),
+                            "link row canvas has no release binding")
 
     def test_open_url_rejects_an_empty_url(self):
         self.assertFalse(self.main.open_url(""))

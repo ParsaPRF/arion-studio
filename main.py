@@ -40,7 +40,7 @@ import i18n
 from i18n import t
 
 APP_NAME = "Arion Studio"
-VERSION = "0.2.0a1"
+VERSION = "0.2.1a1"
 HERE = os.path.dirname(os.path.abspath(__file__))
 SETTINGS_PATH = os.path.join(HERE, "settings.json")
 LOG_DIR = os.path.join(HERE, "logs")
@@ -935,14 +935,15 @@ class TranscribeTab(Tab):
                               padx=12, pady=2)
 
     def _sync_deep(self, *_):
-        uses_gemini = self.prov_menu.get() == t(engine.PROVIDERS[1][1])
+        """Deep mode is a review pass, so either transcription engine can use it.
+
+        Whether it can actually run depends on the reviewer's key; _run checks
+        that so the message names the key the user really needs.
+        """
         try:
-            self.deep_chk.configure(state="normal" if uses_gemini else "disabled")
+            self.deep_chk.configure(state="normal")
         except Exception:
             pass
-        if not uses_gemini and self.deep_var.get():
-            self.deep_var.set(False)
-            self.log(t("ui.log.deep_needs_gemini"))
 
     def _pick_file(self):
         path = fd.askopenfilename(
@@ -1032,11 +1033,13 @@ class TranscribeTab(Tab):
         style_code = label_map(engine.SUBTITLE_STYLES)[self.style_menu.get()]
         fmt = {"SRT": "srt", "TXT": "txt", "SRT + TXT": "both"}[self.fmt_menu.get()]
         prov = label_map(engine.PROVIDERS)[self.prov_menu.get()]
-        deep = bool(self.deep_var.get()) and prov == "gemini"
+        deep = bool(self.deep_var.get())
+        reviewer = (self.app.settings.get("deep_engine") or "gemini").strip()
         cookies = self.cookie_var.get().strip()
 
         groq = engine.groq_keys(self.app.settings.get("groq_key"))
         gem = engine.gemini_keys(self.app.settings.get("gemini_key"))
+        or_keys = engine.openrouter_keys(self.app.settings.get("openrouter_key"))
         # The keys of the engine the user picked: every source needs these, not
         # the Groq ones by default.  Passing the Groq list to a Gemini job made
         # a Gemini-only user hit "no API key" with a valid key saved.
@@ -1049,8 +1052,16 @@ class TranscribeTab(Tab):
             mb.showerror(APP_NAME, t("ui.err.need_gemini_key"),
                          parent=self)
             return
-        if deep and not gem:
-            mb.showerror(APP_NAME, t("ui.err.deep_needs_gemini_key"), parent=self)
+        # The deep review is a second opinion from a *different* model, so it
+        # needs its own key - Gemini (which can also hear the audio) or the free
+        # OpenRouter models (text only).
+        review_keys = or_keys if reviewer == "openrouter" else gem
+        if deep and not review_keys:
+            mb.showerror(
+                APP_NAME,
+                t("ui.err.need_openrouter_key") if reviewer == "openrouter"
+                else t("ui.err.deep_needs_gemini_key"),
+                parent=self)
             return
 
         save_settings(self.app.settings)
@@ -1059,16 +1070,24 @@ class TranscribeTab(Tab):
         self.reset_progress(t("ui.status.starting"))
         self.log(t("ui.log.job_started", v1=source, v2=prov, v3=lang_code, v4=fmt, v5=t("ui.value.yes") if deep else t("ui.value.no")))
 
+        if deep:
+            self.log(t("ui.log.deep_engine", v1=t(f"engine.deep.{reviewer}")))
+        review = dict(deep=deep, refine_keys=review_keys,
+                      refine_provider=reviewer,
+                      refine_models=(engine.openrouter.models()
+                                     if reviewer == "openrouter" else None),
+                      cookies=cookies)
+
         def work():
             if payload[0] == "file":
                 return engine.transcribe_file(
                     job, keys, payload[1], out_dir, language=lang_code,
                     output_format=fmt, style=style_code, provider=prov,
-                    deep=deep, refine_keys=gem, cookies=cookies)
+                    **review)
             return engine.transcribe_youtube(
                 job, keys, payload[1], out_dir, language=lang_code,
                 output_format=fmt, style=style_code, provider=prov,
-                deep=deep, refine_keys=gem, cookies=cookies)
+                **review)
 
         def done(result, err):
             self.set_running(False)
@@ -1547,73 +1566,71 @@ class SettingsTab(Tab):
         ctk.CTkLabel(body, text=t("ui.tab.settings"), font=F(15, "bold"), anchor="w").grid(
             row=0, column=0, columnspan=3, sticky="ew", padx=12, pady=(10, 8))
 
-        # keys
-        ctk.CTkLabel(body, text=t("ui.label.groq_key"), font=F(12)).grid(
-            row=1, column=0, sticky="w", padx=12, pady=3)
-        # Start empty even when a key is stored: the bullets are only a
-        # placeholder hint, so whatever the user types is the bare key.  A value
-        # that began with bullets used to be thrown away by _save() without any
-        # feedback - the "it does not save my API key" symptom.
+        # keys: one row per provider.  Every field starts empty even when a key
+        # is stored - the bullets are only a placeholder hint, so whatever the
+        # user types is the bare key.  (A value that began with bullets used to
+        # be thrown away by _save() without any feedback.)
         self.groq_var = tk.StringVar(value="")
-        self.groq_entry = make_entry(
-            body, textvariable=self.groq_var, show="•",
-            placeholder_text=self._key_placeholder("groq_key"))
-        self.groq_entry.grid(row=1, column=1, sticky="ew", padx=6, pady=3)
-        ctk.CTkButton(body, text=t("ui.btn.test"), width=52, height=26, font=F(11),
-                      command=lambda: self._test_key("groq", self.groq_var.get())
-                      ).grid(row=1, column=2, padx=(0, 12), pady=3)
-
-        ctk.CTkLabel(body, text=t("ui.label.gemini_key"), font=F(12)).grid(
-            row=2, column=0, sticky="w", padx=12, pady=3)
+        self.groq_entry = self._key_row(body, 1, "groq", "groq_key", self.groq_var)
         self.gem_var = tk.StringVar(value="")
-        self.gem_entry = make_entry(
-            body, textvariable=self.gem_var, show="•",
-            placeholder_text=self._key_placeholder("gemini_key"))
-        self.gem_entry.grid(row=2, column=1, sticky="ew", padx=6, pady=3)
-        ctk.CTkButton(body, text=t("ui.btn.test"), width=52, height=26, font=F(11),
-                      command=lambda: self._test_key("gemini", self.gem_var.get())
-                      ).grid(row=2, column=2, padx=(0, 12), pady=3)
+        self.gem_entry = self._key_row(body, 2, "gemini", "gemini_key", self.gem_var)
+        self.or_var = tk.StringVar(value="")
+        self.or_entry = self._key_row(body, 3, "openrouter", "openrouter_key",
+                                      self.or_var)
 
         self.save_keys_var = tk.BooleanVar(value=app.settings.get("save_keys", False))
         ctk.CTkCheckBox(body, text=t("ui.check.save_key_pool"),
                         variable=self.save_keys_var, font=F(12)).grid(
-            row=3, column=0, columnspan=3, sticky="w", padx=12, pady=(6, 2))
+            row=4, column=0, columnspan=3, sticky="w", padx=12, pady=(6, 2))
+
+        # who reviews the transcript in deep mode
+        ctk.CTkLabel(body, text=t("ui.label.deep_engine"), font=F(12)).grid(
+            row=5, column=0, sticky="w", padx=12, pady=3)
+        self.deep_menu = ctk.CTkOptionMenu(
+            body, values=label_list(engine.DEEP_ENGINES), font=F(12), height=28,
+            dynamic_resizing=False)
+        codes = label_map(engine.DEEP_ENGINES)
+        current = (app.settings.get("deep_engine") or "gemini").strip()
+        self.deep_menu.set(next((name for name, code in codes.items()
+                                 if code == current), t("engine.deep.gemini")))
+        self.deep_menu.grid(row=5, column=1, columnspan=2, sticky="ew",
+                            padx=(6, 12), pady=3)
 
         ctk.CTkLabel(body, text=t("ui.label.default_out_dir"), font=F(12)).grid(
-            row=4, column=0, sticky="w", padx=12, pady=3)
+            row=6, column=0, sticky="w", padx=12, pady=3)
         self.out_var = tk.StringVar(value=app.settings["out_dir"])
         make_entry(body, textvariable=self.out_var).grid(
-            row=4, column=1, sticky="ew", padx=6, pady=3)
-        ctk.CTkButton(body, text="…", width=34, font=F(12),
+            row=6, column=1, sticky="ew", padx=6, pady=3)
+        ctk.CTkButton(body, text="...", width=34, font=F(12),
                       command=lambda: self._pick_out_dir(self.out_var,
                                                          t("ui.label.output_dir"))
-                      ).grid(row=4, column=2, padx=(0, 12), pady=3)
+                      ).grid(row=6, column=2, padx=(0, 12), pady=3)
 
         ctk.CTkLabel(body, text=t("ui.label.cookies_file"), font=F(12)).grid(
-            row=5, column=0, sticky="w", padx=12, pady=3)
+            row=7, column=0, sticky="w", padx=12, pady=3)
         self.cookie_var = tk.StringVar(value=app.settings.get("cookies", ""))
         make_entry(body, textvariable=self.cookie_var,
                    placeholder_text="cookies.txt").grid(
-            row=5, column=1, sticky="ew", padx=6, pady=3)
-        ctk.CTkButton(body, text="…", width=34, font=F(12),
+            row=7, column=1, sticky="ew", padx=6, pady=3)
+        ctk.CTkButton(body, text="...", width=34, font=F(12),
                       command=self._pick_cookie).grid(
-            row=5, column=2, padx=(0, 12), pady=3)
+            row=7, column=2, padx=(0, 12), pady=3)
 
         ctk.CTkLabel(body, text=t("ui.label.youtube_proxy"), font=F(12)).grid(
-            row=6, column=0, sticky="w", padx=12, pady=3)
+            row=8, column=0, sticky="w", padx=12, pady=3)
         self.proxy_var = tk.StringVar(value=app.settings.get("proxy", ""))
         make_entry(body, textvariable=self.proxy_var,
                    placeholder_text=t("ui.placeholder.proxy")).grid(
-            row=6, column=1, columnspan=2, sticky="ew", padx=(6, 12), pady=3)
+            row=8, column=1, columnspan=2, sticky="ew", padx=(6, 12), pady=3)
 
         ctk.CTkButton(body, text=t("ui.btn.save_settings"), height=38, font=F(13, "bold"),
                       fg_color=ACCENT, hover_color=ACCENT_HOVER,
                       command=self._save).grid(
-            row=7, column=0, columnspan=3, sticky="ew", padx=12, pady=(12, 8))
+            row=9, column=0, columnspan=3, sticky="ew", padx=12, pady=(12, 8))
 
         # environment status
         env = ctk.CTkFrame(body, corner_radius=10)
-        env.grid(row=8, column=0, columnspan=3, sticky="ew", padx=12, pady=(4, 8))
+        env.grid(row=10, column=0, columnspan=3, sticky="ew", padx=12, pady=(4, 8))
         env.columnconfigure(0, weight=1)
         self.env_lbl = ctk.CTkLabel(env, text=t("ui.status.checking_env"), anchor="w",
                                     justify="right", font=F(11), text_color=MUTED)
@@ -1624,7 +1641,7 @@ class SettingsTab(Tab):
 
         # links
         guide = ctk.CTkFrame(body, corner_radius=10)
-        guide.grid(row=9, column=0, columnspan=3, sticky="ew", padx=12, pady=(0, 8))
+        guide.grid(row=11, column=0, columnspan=3, sticky="ew", padx=12, pady=(0, 8))
         guide.columnconfigure(0, weight=1)
         ctk.CTkLabel(guide, text=t("ui.label.useful_links"), font=F(13, "bold"),
                      anchor="w").grid(row=0, column=0, sticky="ew", padx=10,
@@ -1633,22 +1650,33 @@ class SettingsTab(Tab):
             (t("ui.link.groq_key"), "https://console.groq.com/keys"),
             (t("ui.link.gemini_key"),
              "https://aistudio.google.com/apikey"),
+            (t("ui.link.openrouter_keys"), "https://openrouter.ai/keys"),
             (t("ui.link.cookies_extension"),
              "https://chromewebstore.google.com/detail/get-cookiestxt-locally/"
              "cclelndahbckbenkjhflpdbgdldlbecc"),
             (t("ui.link.customtkinter"),
              "https://github.com/TomSchimansky/CustomTkinter"),
         ]):
-            link = ctk.CTkButton(guide, text=text, height=28, anchor="w",
+            # A full-width row instead of a bare text button: a tap, or a click a
+            # few pixels off, still lands inside the row, and the row reacts to
+            # the release even when CTkButton's own state machine misses it.
+            line = ctk.CTkFrame(guide, fg_color="transparent", height=30)
+            line.grid(row=1 + i, column=0, sticky="ew", padx=6, pady=1)
+            line.columnconfigure(0, weight=1)
+            link = ctk.CTkButton(line, text=text, height=30, anchor="w",
                                  font=F(11), fg_color="transparent",
                                  hover_color=("#ddd", "#333"),
                                  text_color=("#1f6feb", "#8ab4f8"),
                                  command=lambda u=url: self._open_link(u))
-            link.grid(row=1 + i, column=0, sticky="ew", padx=10, pady=1)
-            # A touch tap (or a click that never sends <Enter>) does not always
-            # drive CTkButton's own state machine, so react to the release too;
-            # _open_link debounces the duplicate.
-            for target in (link, getattr(link, "_canvas", link)):
+            link.grid(row=0, column=0, sticky="ew")
+            # Bind the raw canvases, not the CTk widgets: CTkFrame/CTkButton
+            # override bind() and forward it in a way that leaves the handler
+            # unusable, so the row-level tap was silently dead.
+            for target in (getattr(line, "_canvas", None),
+                           getattr(link, "_canvas", None),
+                           getattr(line, "_canvas", None)):
+                if target is None:
+                    continue
                 try:
                     target.bind("<ButtonRelease-1>",
                                 lambda _e, u=url: self._open_link(u), add="+")
@@ -1657,7 +1685,7 @@ class SettingsTab(Tab):
 
         # log for feedback (so self.log works here too)
         self.log_box = make_textbox(body, height=110, wrap="word")
-        self.log_box.grid(row=10, column=0, columnspan=3, sticky="ew",
+        self.log_box.grid(row=12, column=0, columnspan=3, sticky="ew",
                           padx=12, pady=(0, 10))
         self.log_box.configure(state="disabled")
 
@@ -1670,12 +1698,25 @@ class SettingsTab(Tab):
 
         self.refresh_env()
 
+    def _key_row(self, body, row, provider, setting, var):
+        """One provider key line: label, masked entry and a Test button."""
+        ctk.CTkLabel(body, text=t(f"ui.label.{provider}_key"), font=F(12)).grid(
+            row=row, column=0, sticky="w", padx=12, pady=3)
+        entry = make_entry(body, textvariable=var, show="•",
+                           placeholder_text=self._key_placeholder(setting))
+        entry.grid(row=row, column=1, sticky="ew", padx=6, pady=3)
+        ctk.CTkButton(body, text=t("ui.btn.test"), width=52, height=26, font=F(11),
+                      command=lambda p=provider, v=var: self._test_key(p, v.get())
+                      ).grid(row=row, column=2, padx=(0, 12), pady=3)
+        return entry
+
     # ---- actions -----------------------------------------------------------
     def refresh_env(self):
         try:
             status = engine.environment_status(
                 self.app.settings.get("groq_key"),
-                self.app.settings.get("gemini_key"))
+                self.app.settings.get("gemini_key"),
+                self.app.settings.get("openrouter_key"))
         except Exception as exc:
             self.env_lbl.configure(text=t("ui.err.env_check_failed", v1=exc))
             return
@@ -1683,7 +1724,8 @@ class SettingsTab(Tab):
         ytdlp = "✅ yt-dlp" if status["ytdlp"] else t("ui.status.ytdlp_missing")
         text = (f"{ffmpeg}   ·   {ytdlp}   ·   "
                 f"🔑 Groq: {status['keys_groq']}   ·   "
-                f"🔑 Gemini: {status['keys_gemini']}")
+                f"🔑 Gemini: {status['keys_gemini']}   ·   "
+                f"🔑 OpenRouter: {status['keys_openrouter']}")
         self.env_lbl.configure(text=text)
         if not status["ffmpeg"]:
             self.log(t("ui.warn.ffmpeg_not_on_path"))
@@ -1699,8 +1741,10 @@ class SettingsTab(Tab):
         """Hint for a key field: bullets once stored, otherwise the format."""
         if self.app.settings.get(setting):
             return t("ui.placeholder.key_saved")
-        return t("ui.placeholder.groq_key" if setting == "groq_key"
-                 else "ui.placeholder.gemini_key")
+        names = {"groq_key": "ui.placeholder.groq_key",
+                 "gemini_key": "ui.placeholder.gemini_key",
+                 "openrouter_key": "ui.placeholder.openrouter_key"}
+        return t(names.get(setting, "ui.placeholder.groq_key"))
 
     def _open_link(self, url):
         """Open a documentation link and report the outcome in the log."""
@@ -1721,8 +1765,10 @@ class SettingsTab(Tab):
         # An entry that still holds the old bullet mask is treated as "leave it
         # alone"; anything else is the key the user just typed, leading bullets
         # included if a stale mask got pasted in.
-        for var, entry, setting in ((self.groq_var, self.groq_entry, "groq_key"),
-                                    (self.gem_var, self.gem_entry, "gemini_key")):
+        for var, entry, setting in (
+                (self.groq_var, self.groq_entry, "groq_key"),
+                (self.gem_var, self.gem_entry, "gemini_key"),
+                (self.or_var, self.or_entry, "openrouter_key")):
             value = (var.get() or "").strip().lstrip("•").strip()
             if value:
                 s[setting] = value
@@ -1732,9 +1778,12 @@ class SettingsTab(Tab):
             except Exception:
                 pass
         s["save_keys"] = bool(self.save_keys_var.get())
+        s["deep_engine"] = label_map(engine.DEEP_ENGINES).get(
+            self.deep_menu.get(), "gemini")
         if s["save_keys"]:
             for provider, key in (("groq", s.get("groq_key")),
-                                  ("gemini", s.get("gemini_key"))):
+                                  ("gemini", s.get("gemini_key")),
+                                  ("openrouter", s.get("openrouter_key"))):
                 if not key:
                     continue
                 try:

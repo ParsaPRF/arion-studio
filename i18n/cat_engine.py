@@ -10,6 +10,10 @@ Keys are grouped by the engine.py constant or message family they belong to:
 
 CATALOG = {
     # --- LANGUAGES / TRANSLATE_LANGUAGES -------------------------------------
+    "engine.deep.gemini": {"en": "Gemini (hears the audio)", "fa": "Gemini (صدا را می‌شنود)"},
+    "engine.deep.openrouter": {"en": "OpenRouter free models (text only)", "fa": "مدل‌های رایگان OpenRouter (فقط متن)"},
+    "engine.key.openrouter_http": {"en": "OpenRouter rejected the key: {body}", "fa": "OpenRouter کلید را نپذیرفت: {body}"},
+    "engine.key.openrouter_ok": {"en": "✅ OpenRouter key works{extra}", "fa": "✅ کلید OpenRouter کار می‌کند{extra}"},
     "engine.lang.auto": {
         "en": "🔎 Auto-detect",
         "fa": "🔎 تشخیص خودکار / auto",

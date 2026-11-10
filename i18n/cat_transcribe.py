@@ -3,6 +3,7 @@ core.translate, core.srt_utils)."""
 
 CATALOG = {
     # ----- core/transcribe.py: API keys and provider errors -------------------
+    "tr.progress.deep_refine_model": {"en": "🔎 Deep review with {model}", "fa": "🔎 بازبینی عمیق با {model}"},
     "tr.progress.key": {
         "en": "Key {index}/{total}",
         "fa": "کلید {index}/{total}",
