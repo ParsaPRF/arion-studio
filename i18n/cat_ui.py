@@ -108,6 +108,7 @@ CATALOG = {
     "ui.log.key_pool": {"en": "🔑 {v1} pool: {v2} keys", "fa": "🔑 استخر {v1}: {v2} کلید"},
     "ui.log.log_copied": {"en": "📋 Log copied to the clipboard.", "fa": "📋 لاگ در کلیپ‌بورد کپی شد."},
     "ui.log.log_empty": {"en": "The log is empty.", "fa": "لاگ خالی است."},
+    "ui.log.link_opened": {"en": "🌐 Opened in your browser: {v1}", "fa": "🌐 در مرورگر باز شد: {v1}"},
     "ui.log.log_saved": {"en": "💾 Log saved → {v1}", "fa": "💾 لاگ ذخیره شد → {v1}"},
     "ui.log.proxy_applied": {"en": "Proxy applied.", "fa": "پروکسی اعمال شد."},
     "ui.log.proxy_cleared": {"en": "Proxy cleared.", "fa": "پروکسی برداشته شد."},

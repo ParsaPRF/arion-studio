@@ -342,18 +342,82 @@ def make_textbox(parent, **kwargs):
     return widget
 
 
+WIN_BROWSERS = [
+    r"%ProgramFiles%\BraveSoftware\Brave-Browser\Application\brave.exe",
+    r"%ProgramFiles(x86)%\BraveSoftware\Brave-Browser\Application\brave.exe",
+    r"%ProgramFiles%\Google\Chrome\Application\chrome.exe",
+    r"%ProgramFiles(x86)%\Google\Chrome\Application\chrome.exe",
+    r"%LocalAppData%\Google\Chrome\Application\chrome.exe",
+    r"%ProgramFiles%\Microsoft\Edge\Application\msedge.exe",
+    r"%ProgramFiles(x86)%\Microsoft\Edge\Application\msedge.exe",
+    r"%ProgramFiles%\Mozilla Firefox\firefox.exe",
+    r"%ProgramFiles(x86)%\Mozilla Firefox\firefox.exe",
+    r"%LocalAppData%\Programs\Opera\opera.exe",
+    r"%ProgramFiles%\Vivaldi\Application\vivaldi.exe",
+]
+
+
+def _default_browser_exe():
+    """Path of the browser Windows itself would use for https, if findable."""
+    if not sys.platform.startswith("win"):
+        return None
+    try:
+        import winreg
+    except Exception:
+        return None
+    prog = None
+    try:
+        with winreg.OpenKey(
+                winreg.HKEY_CURRENT_USER,
+                r"Software\Microsoft\Windows\Shell\Associations"
+                r"\UrlAssociations\https\UserChoice") as key:
+            prog = winreg.QueryValueEx(key, "ProgId")[0]
+    except OSError:
+        prog = None
+    if not prog:
+        return None
+    try:
+        with winreg.OpenKey(
+                winreg.HKEY_CLASSES_ROOT,
+                prog + r"\shell\open\command") as key:
+            command = winreg.QueryValueEx(key, "")[0]
+    except OSError:
+        return None
+    match = re.match(r'^\s*"([^"]+)"', command) or re.match(r"^\s*(\S+)", command)
+    if not match:
+        return None
+    exe = os.path.expandvars(match.group(1))
+    return exe if os.path.isfile(exe) else None
+
+
+def _spawn(program, url):
+    try:
+        subprocess.Popen([program, url],
+                         stdout=subprocess.DEVNULL,
+                         stderr=subprocess.DEVNULL,
+                         close_fds=True)
+        return True
+    except Exception:
+        return False
+
+
 def open_url(url):
     """Open ``url`` in the user's browser and report whether that worked.
 
-    ``webbrowser.open`` can return False (or raise) when no handler is
-    registered, and on Windows the shell's own launcher is the most reliable
-    route, so try both before giving up.  Callers show the link when this
-    returns False instead of leaving the click silent.
+    On Windows the shell route (``os.startfile``) can accept a URL and still
+    show nothing - a broken default-app entry, a launcher that swallows the
+    request, an app started from an odd session.  So the default browser is
+    resolved from the registry and started directly first, then the shell is
+    tried, then the known browser installs.  Callers show the link when every
+    route fails, instead of leaving the click silent.
     """
     url = (url or "").strip()
     if not url:
         return False
     if sys.platform.startswith("win"):
+        exe = _default_browser_exe()
+        if exe and _spawn(exe, url):
+            return True
         try:
             os.startfile(url)          # the same thing Explorer does
             return True
@@ -369,15 +433,15 @@ def open_url(url):
         return True
     except Exception:
         pass
-    if not sys.platform.startswith("win"):
+    if sys.platform.startswith("win"):
+        for template in WIN_BROWSERS:
+            exe = os.path.expandvars(template)
+            if os.path.isfile(exe) and _spawn(exe, url):
+                return True
+    else:
         opener = "open" if sys.platform == "darwin" else "xdg-open"
-        try:
-            subprocess.Popen([opener, url],
-                             stdout=subprocess.DEVNULL,
-                             stderr=subprocess.DEVNULL)
+        if _spawn(opener, url):
             return True
-        except Exception:
-            pass
     return False
 
 
@@ -1572,11 +1636,21 @@ class SettingsTab(Tab):
             (t("ui.link.customtkinter"),
              "https://github.com/TomSchimansky/CustomTkinter"),
         ]):
-            ctk.CTkButton(guide, text=text, height=28, anchor="w", font=F(11),
-                          fg_color="transparent", hover_color=("#ddd", "#333"),
-                          text_color=("#1f6feb", "#8ab4f8"),
-                          command=lambda u=url: self._open_link(u)).grid(
-                row=1 + i, column=0, sticky="ew", padx=10, pady=1)
+            link = ctk.CTkButton(guide, text=text, height=28, anchor="w",
+                                 font=F(11), fg_color="transparent",
+                                 hover_color=("#ddd", "#333"),
+                                 text_color=("#1f6feb", "#8ab4f8"),
+                                 command=lambda u=url: self._open_link(u))
+            link.grid(row=1 + i, column=0, sticky="ew", padx=10, pady=1)
+            # A touch tap (or a click that never sends <Enter>) does not always
+            # drive CTkButton's own state machine, so react to the release too;
+            # _open_link debounces the duplicate.
+            for target in (link, getattr(link, "_canvas", link)):
+                try:
+                    target.bind("<ButtonRelease-1>",
+                                lambda _e, u=url: self._open_link(u), add="+")
+                except Exception:
+                    pass
 
         # log for feedback (so self.log works here too)
         self.log_box = make_textbox(body, height=110, wrap="word")
@@ -1626,8 +1700,14 @@ class SettingsTab(Tab):
                  else "ui.placeholder.gemini_key")
 
     def _open_link(self, url):
-        """Open a documentation link, and say so if the browser refuses."""
+        """Open a documentation link and report the outcome in the log."""
+        now = time.monotonic()
+        last_url, last_at = getattr(self, "_last_link", (None, 0.0))
+        if url == last_url and now - last_at < 0.6:
+            return                      # the extra tap binding fired as well
+        self._last_link = (url, now)
         if open_url(url):
+            self.log(t("ui.log.link_opened", v1=url))
             return
         message = t("ui.err.link_failed", v1=url)
         self.log(message)

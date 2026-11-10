@@ -565,6 +565,32 @@ class GuiFlowTests(unittest.TestCase):
         status = real_status("gsk_counted_here", "")
         self.assertGreaterEqual(status["keys_groq"], 1)
 
+    def test_settings_link_buttons_also_react_to_a_release(self):
+        # A touch tap does not always drive CTkButton's internal state machine,
+        # so every link button carries its own release binding as well.
+        tab = self._settings_tab()
+
+        found = []
+
+        def walk(widget):
+            if "Button" in type(widget).__name__:
+                try:
+                    if str(widget.cget("text")).startswith("Get a"):
+                        found.append(widget)
+                except Exception:
+                    pass
+            for child in widget.winfo_children():
+                walk(child)
+
+        walk(tab)
+        self.assertEqual(len(found), 2, "expected the two 'Get a ...' links")
+        for button in found:
+            # CTkButton.bind() forwards to its canvas, which is what receives
+            # the pointer event, so check the binding there.
+            canvas = getattr(button, "_canvas", button)
+            self.assertTrue(canvas.bind("<ButtonRelease-1>"),
+                            "link canvas has no release binding")
+
     def test_open_url_rejects_an_empty_url(self):
         self.assertFalse(self.main.open_url(""))
         self.assertFalse(self.main.open_url("   "))
