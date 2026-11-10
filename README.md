@@ -171,7 +171,7 @@ Released under the **[PolyForm Strict License 1.0.0](LICENSE)**: personal and no
 ![Python](https://img.shields.io/badge/python-3.10%2B-green)
 ![License: PolyForm Strict](https://img.shields.io/badge/license-PolyForm%20Strict-c0392b)
 
-**English | [فارسی](#persian)** — [Download the alpha](https://github.com/ParsaPRF/arion-studio/releases)
+**[English](#english)** | فارسی — [Download the alpha](https://github.com/ParsaPRF/arion-studio/releases)
 
 نسخه‌ی دسکتاپِ موتورِ ربات [Arion](https://github.com/ParsaPRF/arion-bot) است؛ ساخته‌شده با رابط گرافیکی **[CustomTkinter](https://github.com/TomSchimansky/CustomTkinter)**. همان موتور زیرنویس/ترجمه/دانلودِ ربات — این‌بار بدون تلگرام و روی کامپیوتر خودتان:
 
