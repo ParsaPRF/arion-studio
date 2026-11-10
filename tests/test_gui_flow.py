@@ -10,6 +10,7 @@ Run:  python -m unittest tests.test_gui_flow -v
 """
 
 import importlib.util
+import json
 import os
 import shutil
 import sys
@@ -407,6 +408,46 @@ class GuiFlowTests(unittest.TestCase):
         self.app.update()
         self.app._apply_scale(1.0)
         self.app.update()
+
+    def test_first_run_is_english_and_switchable(self):
+        """A fresh install (no settings.json) starts in English; Persian is one click away."""
+        original = self.main.SETTINGS_PATH
+        original_language = self.main.i18n.get_language()
+        first_run = os.path.join(self.tmp, "first-run-settings.json")
+        if os.path.exists(first_run):
+            os.remove(first_run)
+        self.main.SETTINGS_PATH = first_run
+        app = None
+        try:
+            app = self.main.App()
+            app.update()
+            self.assertEqual(self.main.i18n.get_language(), "en",
+                             "a first run must default to English")
+            english = app.tabs["transcribe"].start_btn.cget("text")
+            self.assertTrue(english.startswith("🚀 Start"), english)
+            self.assertEqual(app.lang_ui_menu.get(), "English")
+
+            app._on_language("فارسی")
+            app.update()
+            self.assertEqual(self.main.i18n.get_language(), "fa")
+            self.assertNotEqual(app.tabs["transcribe"].start_btn.cget("text"), english)
+            self.assertEqual(app.settings["language"], "fa")
+            for tab in ("download", "translate", "settings"):
+                app.show(tab)
+                app.update()
+
+            app._on_close()
+            with open(first_run, encoding="utf-8") as handle:
+                self.assertEqual(json.load(handle)["language"], "fa",
+                                 "the chosen language must persist")
+        finally:
+            if app is not None:
+                try:
+                    app.destroy()
+                except Exception:
+                    pass
+            self.main.SETTINGS_PATH = original
+            self.main.i18n.set_language(original_language)
 
     def test_shutdown_cancels_timers_and_pumps(self):
         # A fresh app so the class-level one survives for the other tests.

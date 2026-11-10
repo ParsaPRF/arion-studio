@@ -3,6 +3,7 @@
 These run without a display and without network access.
 """
 
+import ast
 import io
 import os
 import re
@@ -183,17 +184,61 @@ class TranslationTests(unittest.TestCase):
 
 
 class SettingsDefaultTests(unittest.TestCase):
-    """The app must greet a first-time user in English."""
+    """The app must greet a first-time user in English.
+
+    These read main.py's ``DEFAULTS`` through the AST instead of importing it,
+    so they also run without customtkinter (i.e. without a GUI toolkit).
+    """
+
+    @staticmethod
+    def resolve(node):
+        """Evaluate the small subset of expressions DEFAULTS uses."""
+        if isinstance(node, ast.Constant):
+            return node.value
+        if (isinstance(node, ast.Attribute)
+                and isinstance(node.value, ast.Name)
+                and node.value.id == "i18n"):
+            return getattr(i18n, node.attr)
+        try:
+            return ast.literal_eval(node)
+        except ValueError:
+            raise AssertionError(
+                f"cannot resolve DEFAULTS['language'] expression "
+                f"{node.__class__.__name__}; keep it literal or i18n.<NAME>")
+
+    @classmethod
+    def defaults_language(cls):
+        import ast
+        path = os.path.join(ROOT, "main.py")
+        with io.open(path, encoding="utf-8") as f:
+            tree = ast.parse(f.read(), filename=path)
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Assign):
+                continue
+            names = [t.id for t in node.targets if isinstance(t, ast.Name)]
+            if "DEFAULTS" not in names or not isinstance(node.value, ast.Dict):
+                continue
+            for key, value in zip(node.value.keys, node.value.values):
+                if isinstance(key, ast.Constant) and key.value == "language":
+                    return cls.resolve(value)
+        raise AssertionError('DEFAULTS["language"] is missing from main.py')
 
     def test_defaults_request_english(self):
-        import main  # needs the CustomTkinter stub or the real package
-        self.assertEqual(main.DEFAULTS["language"], "en")
+        self.assertEqual(self.defaults_language(), "en")
 
-    def test_missing_language_key_means_english(self):
-        import main
-        settings = dict(main.DEFAULTS)
-        settings.pop("language", None)
-        self.assertEqual(settings.get("language", i18n.DEFAULT_LANGUAGE), "en")
+    def test_english_is_what_a_fresh_process_shows(self):
+        """No set_language() call at all: the very first t() is English."""
+        i18n.set_language(i18n.DEFAULT_LANGUAGE)
+        for key in ("ui.btn.start", "ui.btn.cancel", "ui.nav.transcribe"):
+            text = i18n.t(key)
+            self.assertTrue(text and text != key, f"{key} has no English text")
+            self.assertFalse(PERSIAN.search(text), f"{key} is not English: {text!r}")
+
+    def test_old_settings_without_language_stay_english(self):
+        """A settings.json written by v0.1.0-alpha has no "language" key."""
+        from_old_version = {"geometry": "1240x800", "theme": "system"}
+        self.assertEqual(
+            from_old_version.get("language", self.defaults_language()), "en")
 
 
 if __name__ == "__main__":
