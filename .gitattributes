@@ -1,0 +1,7 @@
+# Keep line endings sane across platforms:
+#  - Windows batch files must be CRLF or cmd.exe mis-parses `^` continuations
+#    (and can split arguments in half);
+#  - shell scripts must be LF or bash fails with "$'\r': command not found".
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.sh  text eol=lf

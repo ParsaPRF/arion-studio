@@ -43,31 +43,88 @@ if errorlevel 1 (
     echo.
 )
 
-rem --- 3) venv + dependencies ------------------------------------------------
-if not exist venv (
+rem --- 3) venv --------------------------------------------------------------
+rem A half-created venv (no python.exe) would break every later step, so
+rem rebuild it instead of failing with a confusing error.
+if exist venv if not exist "venv\Scripts\python.exe" (
+    echo   Existing venv is incomplete - rebuilding it...
+    rmdir /s /q venv
+)
+if not exist "venv\Scripts\python.exe" (
     echo Creating virtual environment...
-    %PYCMD% -m venv venv || (echo   venv creation failed & pause & exit /b 1)
+    %PYCMD% -m venv venv
+    if errorlevel 1 (
+        echo   venv creation failed.
+        pause
+        exit /b 1
+    )
 )
 
-call venv\Scripts\activate.bat
+set "VPY=venv\Scripts\python.exe"
 
-if exist venv\.deps_ok goto deps_done
+"%VPY%" -m pip --version >nul 2>nul
+if errorlevel 1 (
+    echo   Bootstrapping pip in the virtual environment...
+    "%VPY%" -m ensurepip --upgrade
+)
+
+rem --- 4) dependencies ------------------------------------------------------
+rem The marker alone is not trusted: a requirements change or a half-finished
+rem install must not be mistaken for a working environment.
+if exist "venv\.deps_ok" (
+    "%VPY%" -c "import customtkinter, dotenv, requests, yt_dlp" >nul 2>nul
+    if not errorlevel 1 goto deps_done
+    echo   Existing packages are incomplete - reinstalling dependencies...
+)
+
+rem pip writes to %LOCALAPPDATA%\pip\Cache and to %TEMP%. When either is locked
+rem (antivirus, OneDrive-redirected AppData, a stale cache, a restricted
+rem profile) pip can block forever without printing anything - the "Installing
+rem python dependencies..." hang. Keep every temp file inside the app folder
+rem and disable the HTTP cache.
+if not exist ".tmp" mkdir ".tmp"
+set "TEMP=%~dp0.tmp"
+set "TMP=%~dp0.tmp"
+set "TMPDIR=%~dp0.tmp"
+set "PIP_NO_CACHE_DIR=1"
+set "PIP_DISABLE_PIP_VERSION_CHECK=1"
+set "PIP_NO_INPUT=1"
+set "PIP_DEFAULT_TIMEOUT=20"
 
 echo Installing python dependencies...
-pip install --disable-pip-version-check -r requirements.txt
-if not errorlevel 1 goto deps_mark
+echo   About 5 MB to download; on a slow connection this can take a few minutes.
+echo.
+"%VPY%" -m pip install --no-cache-dir --disable-pip-version-check --no-input --prefer-binary --timeout 20 --retries 2 -r requirements.txt
+if not errorlevel 1 goto deps_verify
 
-echo   Primary PyPI unreachable - trying the runflare mirror...
-pip install --disable-pip-version-check -i https://mirror-pypi.runflare.com/simple -r requirements.txt
+echo.
+echo   Primary PyPI failed or was too slow - trying the runflare mirror...
+"%VPY%" -m pip install --no-cache-dir --disable-pip-version-check --no-input --prefer-binary --timeout 20 --retries 2 -i https://mirror-pypi.runflare.com/simple -r requirements.txt
 if errorlevel 1 (
-    echo   Dependency install failed. Check your internet connection.
+    echo.
+    echo   Dependency install failed. Check your internet connection, then retry:
+    echo       venv\Scripts\python.exe -m pip install --no-cache-dir -r requirements.txt
+    echo   If that hangs too, add:  --timeout 20 --retries 2
     pause
     exit /b 1
 )
 
-:deps_mark
-echo done > venv\.deps_ok
+:deps_verify
+"%VPY%" -c "import customtkinter, dotenv, requests, yt_dlp" >nul 2>nul
+if errorlevel 1 (
+    echo.
+    echo   Dependencies were installed but cannot be imported.
+    echo   Please report this with the output above.
+    pause
+    exit /b 1
+)
+echo done > "venv\.deps_ok"
 
 :deps_done
-rem --- 4) run ---------------------------------------------------------------
-python main.py
+rem --- 5) run ---------------------------------------------------------------
+if defined ARION_NO_LAUNCH (
+    echo Dependencies are ready. ARION_NO_LAUNCH is set, so the app is not started.
+    exit /b 0
+)
+echo Starting Arion Studio...
+"%VPY%" main.py

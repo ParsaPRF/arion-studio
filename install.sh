@@ -64,16 +64,38 @@ if ! "$PY" -c "import tkinter" >/dev/null 2>&1; then
 fi
 
 # --- 4) venv + dependencies -----------------------------------------------------
+if [ -d venv ] && [ ! -x venv/bin/python ]; then
+    echo "⚠️  Existing venv is incomplete — rebuilding it..."
+    rm -rf venv
+fi
 if [ ! -d venv ]; then
     "$PY" -m venv venv
 fi
-venv/bin/pip install --upgrade pip --disable-pip-version-check --quiet
-echo "Installing python dependencies…"
-if ! venv/bin/pip install --disable-pip-version-check -r requirements.txt; then
-    echo "↻ PyPI unreachable — trying the runflare mirror…"
-    venv/bin/pip install --disable-pip-version-check \
+venv/bin/python -m pip --version >/dev/null 2>&1 || venv/bin/python -m ensurepip --upgrade
+venv/bin/python -m pip install --upgrade pip --disable-pip-version-check --quiet
+
+# pip needs a writable HTTP cache and $TMPDIR. A locked cache (read-only $HOME,
+# full disk, snap/Flatpak confinement) makes pip wait with no output at all, so
+# install cache-free and with bounded timeouts: a dead network then fails fast
+# and the mirror fallback below can actually run.
+PIP_FLAGS=(--no-cache-dir --disable-pip-version-check --no-input
+           --prefer-binary --timeout 20 --retries 2)
+
+echo "Installing python dependencies..."
+echo "   About 5 MB to download; on a slow connection this can take a few minutes."
+
+if ! venv/bin/python -m pip install "${PIP_FLAGS[@]}" -r requirements.txt; then
+    echo "↻ PyPI unreachable — trying the runflare mirror..."
+    venv/bin/python -m pip install "${PIP_FLAGS[@]}" \
         -i https://mirror-pypi.runflare.com/simple -r requirements.txt
 fi
+
+# Trust the imports, not just pip's exit code.
+if ! venv/bin/python -c "import customtkinter, dotenv, requests, yt_dlp" >/dev/null 2>&1; then
+    echo "❌ Dependencies installed but cannot be imported. Please report the output above."
+    exit 1
+fi
+echo "✅ Dependencies ok"
 
 # --- 5) launcher + application menu entry ---------------------------------------
 chmod +x run.sh
