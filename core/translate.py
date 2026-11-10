@@ -12,6 +12,8 @@ import sys
 import tempfile
 import time
 
+from i18n import t
+
 from . import config, keypool
 from .transcribe import KeyRotator, GEMINI_HELPER
 
@@ -91,7 +93,7 @@ def _call_gemini_translate(chunk_text, language, style, key, model, use_vpn,
             proc = subprocess.Popen(cmd, stdout=subprocess.PIPE,
                                     stderr=subprocess.PIPE, text=True)
         except FileNotFoundError as exc:
-            return 3, f"اجرای gemini_worker ناموفق: {exc}"
+            return 3, t("translate.err.worker_start", error=exc)
         try:
             while proc.poll() is None:
                 if cancel_check:
@@ -135,11 +137,11 @@ def _translate_chunk(chunk, target_language, style, rot, models, use_vpn,
                 got = _parse_translated(payload)
                 if got:
                     return got
-                last = "پاسخ خالی از مدل"
+                last = t("translate.err.empty_model")
                 rot.advance()
                 continue
             if rc == 4:
-                last = "IP توسط گوگل بلاک شده (VPN لازم است)"
+                last = t("translate.err.ip_blocked")
             elif rc == 1:
                 last = (payload or "model")[-120:]
                 continue  # model unsupported: try the next model, keep the key
@@ -155,7 +157,7 @@ def translate_srt(srt_text, target_language, style="casual", keys=None, progress
     """Translate srt_text; returns translated SRT text. 'keys' = list of Gemini keys."""
     items = parse_srt(srt_text)
     if not items:
-        raise TranslateError("SRT معتبر نبود / خطی پیدا نشد.")
+        raise TranslateError(t("translate.err.bad_srt"))
 
     if keys is None:
         try:
@@ -164,7 +166,7 @@ def translate_srt(srt_text, target_language, style="casual", keys=None, progress
             keys = []
     keys = [k for k in keys if k]
     if not keys:
-        raise TranslateError("هیچ کلید Gemini برای ترجمه تنظیم نشده است.")
+        raise TranslateError(t("translate.err.no_keys"))
 
     models = config.GEMINI_MODELS
     use_vpn = config.GEMINI_USE_VPN and bool(config.YT_NETNS)
@@ -189,16 +191,16 @@ def translate_srt(srt_text, target_language, style="casual", keys=None, progress
         chunks = [pending[i:i + CHUNK_SIZE] for i in range(0, len(pending), CHUNK_SIZE)]
         total = len(chunks)
         report(int(100 * len(translated) / max(1, total_items)),
-               f"🌍 ترجمه به {target_language} — پاس {attempt} · "
-               f"{len(translated)}/{total_items} خط")
+               t("translate.progress.pass", language=target_language,
+                 attempt=attempt, done=len(translated), lines=total_items))
         for ci, chunk in enumerate(chunks):
             if cancel_check:
                 cancel_check()
             done_before = len(translated)
             pct = 100.0 * (done_before + (ci / max(1, total)) * len(chunk)) / max(1, total_items)
             report(int(pct),
-                   f"🌍 ترجمه بخش {ci + 1}/{total} (پاس {attempt}) — "
-                   f"{len(translated)}/{total_items} خط")
+                   t("translate.progress.chunk", index=ci + 1, chunks=total,
+                     attempt=attempt, done=len(translated), lines=total_items))
             try:
                 got = _translate_chunk(chunk, target_language, style, rot, models,
                                        use_vpn, cancel_check)
@@ -210,7 +212,7 @@ def translate_srt(srt_text, target_language, style="casual", keys=None, progress
         pending = [it for it in items if it["index"] not in translated]
         if pending:
             report(int(100 * len(translated) / max(1, total_items)),
-                   f"🔁 {len(pending)} خط ترجمه نشد؛ تلاش دوباره ({attempt}/3)…")
+                   t("translate.progress.retry", pending=len(pending), attempt=attempt))
 
     missing = 0
     for it in items:
@@ -218,8 +220,8 @@ def translate_srt(srt_text, target_language, style="casual", keys=None, progress
             it["text"] = translated[it["index"]]
         else:
             missing += 1
-    report(100, f"✅ ترجمه کامل شد ({len(items) - missing}/{len(items)} خط)")
+    report(100, t("translate.progress.done", done=len(items) - missing, total=len(items)))
     if missing:
-        report(100, f"⚠️ {missing} خط ترجمه نشد و به زبان اصلی ماند "
-                    f"({len(items) - missing}/{len(items)} خط ترجمه شد)")
+        report(100, t("translate.progress.missing", missing=missing,
+                      done=len(items) - missing, total=len(items)))
     return build_srt(items)

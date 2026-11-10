@@ -2,9 +2,9 @@ import re
 from datetime import timedelta
 
 # Subtitle styles
-STYLE_SENTENCE = "sentence"   # جمله/پاراگراف استاندارد
-STYLE_SHORT = "short"         # خطوط کوتاه و خوانا (خوب برای ترجمه)
-STYLE_WORD = "word"           # کلمه به کلمه
+STYLE_SENTENCE = "sentence"   # standard sentence/paragraph cue
+STYLE_SHORT = "short"         # short, readable lines (best for translation)
+STYLE_WORD = "word"           # word by word
 
 
 def parse_srt_time(t):

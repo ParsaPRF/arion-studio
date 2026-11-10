@@ -15,6 +15,8 @@ import sys
 import threading
 import time
 
+from i18n import t
+
 from . import config
 
 
@@ -261,8 +263,7 @@ def _run_ytdlp_once(cmd, progress=None, cancel_event=None):
                                 stdin=subprocess.DEVNULL, text=True,
                                 errors="replace", bufsize=1)
     except FileNotFoundError:
-        raise DownloadError("yt-dlp اجرا نشد؛ بسته‌ی yt-dlp نصب نیست "
-                            "(pip install -r requirements.txt).")
+        raise DownloadError(t("dl.err.no_ytdlp"))
 
     out_lines, err_lines = [], []
     sink_lock = threading.Lock()
@@ -293,7 +294,7 @@ def _run_ytdlp_once(cmd, progress=None, cancel_event=None):
     while proc.poll() is None:
         if cancel_event is not None and cancel_event.is_set():
             _terminate(proc)
-            raise DownloadCancelled("دانلود لغو شد.")
+            raise DownloadCancelled(t("dl.err.cancelled"))
         time.sleep(0.12)
 
     rc = proc.returncode
@@ -321,10 +322,10 @@ def _run_ytdlp(cmd, progress=None, cancel_event=None):
     if result.returncode != 0:
         blob = (result.stdout or "") + (result.stderr or "")
         if "HTTP Error 429" in blob or "Too Many Requests" in blob:
-            _emit(progress, message="⏳ یوتیوب محدودیت موقت داد؛ ۴۵ ثانیه صبر و تلاش دوباره…")
+            _emit(progress, message=t("dl.log.rate_limit_retry"))
             for _ in range(45):
                 if cancel_event is not None and cancel_event.is_set():
-                    raise DownloadCancelled("دانلود لغو شد.")
+                    raise DownloadCancelled(t("dl.err.cancelled"))
                 time.sleep(1)
             result = _run_ytdlp_once(cmd, progress, cancel_event)
     return result
@@ -350,16 +351,15 @@ def _newest_file(work_dir, exts):
 
 def _explain_failure(msg):
     if "Sign in to confirm" in msg or "not a bot" in msg:
-        return ("\n\n💡 یوتیوب این IP را بلاک کرده. یک فایل cookies.txt از تب دانلود "
-                "معرفی کن یا پروکسی بگذار.")
+        return t("dl.err.hint_bot_check")
     if "No supported JavaScript runtime" in msg or "JS runtime" in msg:
-        return "\n\n💡 yt-dlp به یک JS runtime (Node/Deno) نیاز دارد؛ نصبش کن یا نسخه‌ی yt-dlp را به‌روز کن."
+        return t("dl.err.hint_js_runtime")
     if "Requested format is not available" in msg:
-        return "\n\n💡 این کیفیت برای این ویدیو موجود نیست؛ گزینه‌ی دیگری انتخاب کن."
+        return t("dl.err.hint_format_unavailable")
     if "HTTP Error 403" in msg:
-        return "\n\n💡 دسترسی به این ویدیو محدود است (403)؛ کوکی یا پروکسی لازم است."
+        return t("dl.err.hint_forbidden")
     if "Private video" in msg or "Video unavailable" in msg:
-        return "\n\n💡 ویدیو خصوصی/حذف‌شده است."
+        return t("dl.err.hint_unavailable")
     return ""
 
 
@@ -410,7 +410,7 @@ def download_youtube_audio(url, work_dir, cookies_path=None, use_vpn=False,
     """Download the audio track of a YouTube URL as mono 16 kHz mp3."""
     os.makedirs(work_dir, exist_ok=True)
     out_tmpl = os.path.join(work_dir, "%(title).150B.%(ext)s")
-    _emit(progress, message="🔎 خواندن اطلاعات ویدیو…")
+    _emit(progress, message=t("dl.log.probing"))
 
     cmd = _base_cmd(use_vpn, progress=bool(progress))
     cmd += SPEED_FLAGS + [
@@ -432,8 +432,8 @@ def download_youtube_audio(url, work_dir, cookies_path=None, use_vpn=False,
 
     path = _last_existing_path(result.stdout) or _newest_file(work_dir, ("mp3",))
     if not path:
-        raise DownloadError("فایل صوتی دانلودشده پیدا نشد.")
-    _emit(progress, 100, "", "", "✅ دانلود صدا تمام شد")
+        raise DownloadError(t("dl.err.audio_not_found"))
+    _emit(progress, 100, "", "", t("dl.log.audio_done"))
     return path
 
 
@@ -446,7 +446,7 @@ def download_youtube_video(url, work_dir, quality="best", cookies_path=None,
     """
     os.makedirs(work_dir, exist_ok=True)
     out_tmpl = os.path.join(work_dir, "%(title).150B.%(ext)s")
-    _emit(progress, message="🔎 خواندن اطلاعات ویدیو…")
+    _emit(progress, message=t("dl.log.probing"))
 
     cmd = _base_cmd(use_vpn, progress=bool(progress)) + SPEED_FLAGS
     audio_target = DL_AUDIO_TARGET.get(str(quality or "").lower())
@@ -475,8 +475,8 @@ def download_youtube_video(url, work_dir, quality="best", cookies_path=None,
 
     path = _last_existing_path(result.stdout) or _newest_file(work_dir, exts)
     if not path:
-        raise DownloadError("فایل دانلودشده پیدا نشد.")
-    _emit(progress, 100, "", "", "✅ دانلود تمام شد")
+        raise DownloadError(t("dl.err.file_not_found"))
+    _emit(progress, 100, "", "", t("dl.log.video_done"))
     return path
 
 
@@ -502,7 +502,7 @@ def list_playlist(url, cookies_path=None, use_vpn=False, max_items=25):
 
 def get_youtube_info(url, cookies_path=None, use_vpn=False, timeout=60,
                      progress=None):
-    _emit(progress, message="🔎 خواندن اطلاعات ویدیو…")
+    _emit(progress, message=t("dl.log.probing"))
     cmd = _base_cmd(use_vpn)
     cmd += ["--skip-download", "--socket-timeout", "15", "--retries", "1",
             "--dump-single-json"]
@@ -511,20 +511,19 @@ def get_youtube_info(url, cookies_path=None, use_vpn=False, timeout=60,
     try:
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
     except subprocess.TimeoutExpired:
-        raise DownloadError("خواندن اطلاعات ویدیو زمان‌بر شد (timeout).")
+        raise DownloadError(t("dl.err.info_timeout"))
 
     blob = (r.stdout or "") + (r.stderr or "")
     if r.returncode != 0:
         if "HTTP Error 429" in blob or "Too Many Requests" in blob:
-            raise DownloadError("یوتیوب موقتاً درخواست‌های این سیستم را محدود کرده (429). "
-                                "چند دقیقه بعد دوباره امتحان کن.")
+            raise DownloadError(t("dl.err.rate_limited"))
         raise DownloadError(((r.stderr or "").strip()[-500:]
-                             or "خواندن اطلاعات ویدیو ناموفق بود.")
+                             or t("dl.err.info_failed"))
                             + _explain_failure(blob))
     try:
         info = json.loads(r.stdout)
     except Exception:
-        raise DownloadError("پاسخ اطلاعات ویدیو قابل خواندن نبود.")
+        raise DownloadError(t("dl.err.info_unreadable"))
     _cache_store(url, cookies_path, use_vpn, info)
     return info
 
@@ -596,11 +595,11 @@ def probe_sizes(url, cookies_path=None, use_vpn=False, progress=None):
          "video": {"144": mb, ..., "best": mb},
          "audio": {"mp3": mb, "m4a": mb, "opus": mb, "flac": mb}}
     """
-    _emit(progress, message="⚖️ تخمین حجم: خواندن اطلاعات ویدیو…")
+    _emit(progress, message=t("dl.log.size_reading"))
     info = _cached_info(url, cookies_path, use_vpn, progress=progress)
     if not info:
-        raise DownloadError("اطلاعات این ویدیو خوانده نشد (لینک یا اتصال را بررسی کن).")
-    _emit(progress, message="⚖️ تخمین حجم: محاسبه‌ی کیفیت‌ها…")
+        raise DownloadError(t("dl.err.size_no_info"))
+    _emit(progress, message=t("dl.log.size_calculating"))
 
     duration = float(info.get("duration") or 0)
     fmts = info.get("formats") or []
@@ -649,7 +648,7 @@ def probe_sizes(url, cookies_path=None, use_vpn=False, progress=None):
         audio["opus"] = mb(audio_size * 0.85) if audio_size else None
         # FLAC of 16 kHz mono speech lands around 300 kbps.
         audio["flac"] = max(1, int(round(duration * 300000 / 8 / 1048576.0)))
-    _emit(progress, 100, "", "", "✅ تخمین حجم آماده شد")
+    _emit(progress, 100, "", "", t("dl.log.size_done"))
     return {
         "title": info.get("title") or "",
         "uploader": info.get("uploader") or info.get("channel") or "",
@@ -703,7 +702,7 @@ def download_youtube_info_txt(url, work_dir, cookies_path=None, use_vpn=False,
     path = os.path.join(work_dir, sanitize_filename(title) + "_info.txt")
     with open(path, "w", encoding="utf-8") as f:
         f.write("\n".join(lines_out).rstrip() + "\n")
-    _emit(progress, 100, "", "", "✅ فایل مشخصات نوشته شد")
+    _emit(progress, 100, "", "", t("dl.log.info_txt_done"))
     return path, title
 
 
@@ -714,7 +713,7 @@ def download_youtube_subtitle(url, work_dir, lang=None, cookies_path=None,
     Returns (path, lang_used, kind, title).
     """
     os.makedirs(work_dir, exist_ok=True)
-    _emit(progress, message="🔎 خواندن اطلاعات و زیرنویس‌ها…")
+    _emit(progress, message=t("dl.log.probing_subs"))
     info = get_youtube_info(url, cookies_path, use_vpn, progress=progress)
     manual = list((info.get("subtitles") or {}).keys())
     auto = list((info.get("automatic_captions") or {}).keys())
@@ -742,7 +741,7 @@ def download_youtube_subtitle(url, work_dir, lang=None, cookies_path=None,
                           orig if (orig and orig in auto) else auto[0])
             kind = "auto"
         if not target:
-            raise DownloadError("این ویدیو هیچ زیرنویس/کپشنی ندارد.")
+            raise DownloadError(t("dl.err.no_subtitles"))
     else:
         target = lang
         if target in manual:
@@ -754,9 +753,9 @@ def download_youtube_subtitle(url, work_dir, lang=None, cookies_path=None,
         elif manual:
             kind = "manual"
         else:
-            raise DownloadError("این ویدیو هیچ زیرنویس/کپشنی ندارد.")
+            raise DownloadError(t("dl.err.no_subtitles"))
 
-    _emit(progress, 5, "", "", f"⬇️ دریافت زیرنویس «{target}» ({kind})…")
+    _emit(progress, 5, "", "", t("dl.log.sub_fetching", target=target, kind=kind))
     out_tmpl = os.path.join(work_dir, "sub.%(ext)s")
     cmd = _base_cmd(use_vpn)
     cmd += ["--skip-download", "--socket-timeout", "20", "--retries", "2"]
@@ -778,7 +777,7 @@ def download_youtube_subtitle(url, work_dir, lang=None, cookies_path=None,
         if files:
             break
         if attempt == 1 and ("HTTP Error 429" in blob or "Too Many Requests" in blob):
-            _emit(progress, 15, "", "", "⏳ محدودیت موقت یوتیوب؛ ۴۵ ثانیه صبر…")
+            _emit(progress, 15, "", "", t("dl.log.sub_rate_limit_wait"))
             time.sleep(45)
             continue
         break
@@ -792,16 +791,14 @@ def download_youtube_subtitle(url, work_dir, lang=None, cookies_path=None,
                 path, tgt, kd, ttl = download_youtube_subtitle(
                     url, work_dir, None, cookies_path, use_vpn, progress)
                 return (path, tgt,
-                        kd + " (ترجمهٔ خودکار یوتیوب محدود بود؛ نسخهٔ اصلی)", ttl)
+                        kd + t("dl.sub.fallback_note"), ttl)
             except Exception:
                 pass
         if "HTTP Error 429" in blob or "Too Many Requests" in blob:
-            raise DownloadError("یوتیوب موقتاً درخواست‌های این سیستم را محدود کرده (429). "
-                                "چند دقیقه بعد دوباره امتحان کن.")
+            raise DownloadError(t("dl.err.rate_limited"))
         if original_wanted:
-            raise DownloadError("این ویدیو زیرنویس آماده ندارد.")
-        raise DownloadError(f"این ویدیو زیرنویس به زبان «{target}» ندارد "
-                            "(و ترجمهٔ خودکار هم موجود نیست).")
+            raise DownloadError(t("dl.err.no_ready_subs"))
+        raise DownloadError(t("dl.err.no_subs_in_lang", target=target))
     path = max(files, key=os.path.getmtime)
-    _emit(progress, 100, "", "", "✅ زیرنویس دریافت شد")
+    _emit(progress, 100, "", "", t("dl.log.sub_done"))
     return path, target, kind, title

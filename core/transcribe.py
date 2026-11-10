@@ -6,6 +6,8 @@ import time
 
 import requests
 
+from i18n import t
+
 from . import config
 from . import keypool
 from .audio import compress_to_mp3, get_duration, split_audio
@@ -74,7 +76,8 @@ class KeyRotator:
     def label(self):
         if len(self.keys) <= 1:
             return ""
-        return f"کلید {self.i % len(self.keys) + 1}/{len(self.keys)}"
+        return t("tr.progress.key", index=self.i % len(self.keys) + 1,
+                 total=len(self.keys))
 
 
 # ---------------- Groq / Whisper ----------------
@@ -107,7 +110,7 @@ def _post(rotator, chunk_path, data, max_attempts=None, cancel_check=None):
                 files = {"file": (os.path.basename(chunk_path), f, "audio/mpeg")}
                 resp = requests.post(GROQ_URL, headers=headers, files=files, data=data, timeout=1800)
         except Exception as e:
-            last_error = f"خطای شبکه: {e}"
+            last_error = t("tr.err.network", error=e)
             _sleep(min(30, 3 * attempt), cancel_check)
             continue
 
@@ -120,15 +123,15 @@ def _post(rotator, chunk_path, data, max_attempts=None, cancel_check=None):
             rotator.advance()
             continue
         if resp.status_code == 413:
-            raise TranscriptionError("حجم تکه برای سرور بیش از حد بزرگ است.")
+            raise TranscriptionError(t("tr.err.chunk_too_large"))
         if resp.status_code == 429 or any(m in body.lower() for m in QUOTA_MARKERS):
             saw_quota = True
             m = re.search(r"try again in ([\d.]+)\s*s", body, re.I)
             if m:
-                retry_hint = m.group(1) + " ثانیه"
+                retry_hint = t("tr.retry.seconds", seconds=m.group(1))
             ra = resp.headers.get("retry-after")
             if ra:
-                retry_hint = f"{ra} ثانیه" if ra.isdigit() else ra
+                retry_hint = t("tr.retry.seconds", seconds=ra) if ra.isdigit() else ra
             rotator.advance()
             _sleep(min(30, 3 * attempt), cancel_check)
             continue
@@ -136,8 +139,8 @@ def _post(rotator, chunk_path, data, max_attempts=None, cancel_check=None):
         if attempt >= max(2, 2 * n):
             raise TranscriptionError(last_error)
     if saw_quota:
-        raise RateLimitedError(f"محدودیت API: {last_error}", retry_hint)
-    raise TranscriptionError(f"همه‌ی کلیدها/تلاشها ناموفق بودند: {last_error}")
+        raise RateLimitedError(t("tr.err.rate_limited", detail=last_error), retry_hint)
+    raise TranscriptionError(t("tr.err.all_failed", detail=last_error))
 
 
 def _transcribe_chunk_groq(rotator, chunk_path, language, style, cancel_check=None):
@@ -169,7 +172,7 @@ def _transcribe_chunk_groq(rotator, chunk_path, language, style, cancel_check=No
     resp2 = _post(rotator, chunk_path, data2, cancel_check=cancel_check)
     if resp2.text.strip():
         return resp2.text.strip() + "\n", detected
-    raise TranscriptionError("پاسخ ترنسکرایب خالی بود (نه سگمنت و نه متن).")
+    raise TranscriptionError(t("tr.err.empty_response"))
 
 
 # ---------------- Gemini (via helper process, optionally inside the VPN netns) ----------------
@@ -192,7 +195,7 @@ def _gemini_call(model, key, audio_path, language, style, use_vpn):
     try:
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=1800)
     except Exception as e:
-        return 3, f"خطای اجرا: {e}"
+        return 3, t("tr.err.run", error=e)
     if r.returncode == 0 and os.path.exists(out_path):
         try:
             with open(out_path, encoding="utf-8") as f:
@@ -218,7 +221,7 @@ def _transcribe_chunk_gemini(rotator, models, chunk_path, language, style, use_v
                 srt = (payload or "").strip()
                 if srt:
                     return srt if srt.endswith("\n") else srt + "\n"
-                last = "پاسخ خالی از Gemini"
+                last = t("tr.err.empty_gemini")
                 rotator.advance()
                 continue
             last = (payload or f"rc={rc}")[-200:]
@@ -228,21 +231,21 @@ def _transcribe_chunk_gemini(rotator, models, chunk_path, language, style, use_v
                 saw_quota = True
                 m = re.search(r"retry[^\d]*([\d.]+)s", payload or "", re.I)
                 if m:
-                    retry_hint = m.group(1) + " ثانیه"
+                    retry_hint = t("tr.retry.seconds", seconds=m.group(1))
                 rotator.advance()
                 continue
             if rc == 6:      # invalid/forbidden key
                 rotator.advance()
                 continue
             if rc == 4:      # IP blocked by Google
-                last = "IP توسط گوگل بلاک شده است (VPN لازم است)"
+                last = t("tr.err.ip_blocked")
                 rotator.advance()
                 continue
             rotator.advance()  # rc==3 network -> rotate
             continue
     if saw_quota:
-        raise RateLimitedError(f"محدودیت API Gemini: {last}", retry_hint)
-    raise TranscriptionError(f"Gemini ناموفق بود: {last}")
+        raise RateLimitedError(t("tr.err.gemini_rate_limited", detail=last), retry_hint)
+    raise TranscriptionError(t("tr.err.gemini_failed", detail=last))
 
 
 def _audio_refine_call(model, key, audio_path, in_path, out_path, language, style, use_vpn):
@@ -313,7 +316,7 @@ def _refine_chunks_with_audio(chunk_files, chunk_srt_paths, out_dir, report, key
         except OSError:
             pass
         report(int(100 * (i - 1) / max(1, total)),
-               f"🔬 بازبینی شنیداری تکه {i}/{total}...",
+               t("tr.progress.audio_review", index=i, total=total),
                88 + 7 * ((i - 1) / max(1, total)))
         ok = False
         for model in (models or ["gemini-3.5-flash"]):
@@ -336,7 +339,7 @@ def _refine_chunks_with_audio(chunk_files, chunk_srt_paths, out_dir, report, key
             refined += 1
         else:
             final_paths.append(srt_path)
-    report(100, f"🔬 بازبینی شنیداری ✦ ({refined}/{total} تکه)", 95)
+    report(100, t("tr.progress.audio_review_done", done=refined, total=total), 95)
     return final_paths, refined
 
 
@@ -443,17 +446,18 @@ def transcribe_file(api_keys, input_path, work_dir, language="fa", output_format
             cancel_check()
 
     def audio_progress(stage_pct, label=None):
-        report(stage_pct, label or "🎛️ پردازش صدا…", 3 + (stage_pct or 0) * 0.07)
+        report(stage_pct, label or t("tr.progress.audio_processing"),
+               3 + (stage_pct or 0) * 0.07)
 
     check_cancel()
-    report(0, "🎛️ فشرده‌سازی صدا...", 3)
+    report(0, t("tr.progress.compressing"), 3)
     try:
         audio_path = compress_to_mp3(
             input_path, os.path.join(work_dir, "audio.mp3"),
             progress=audio_progress, cancel_check=check_cancel)
     except Exception as e:
-        raise ProcessingError("فشرده‌سازی صدا (ffmpeg)", str(e))
-    report(100, "🎛️ فشرده‌سازی صدا ✦", 10)
+        raise ProcessingError(t("tr.stage.compress"), str(e))
+    report(100, t("tr.progress.compressing_done"), 10)
 
     if provider == "gemini":
         chunk_minutes = (config.GEMINI_CHUNK_MINUTES // 2) if deep else config.GEMINI_CHUNK_MINUTES
@@ -463,14 +467,14 @@ def transcribe_file(api_keys, input_path, work_dir, language="fa", output_format
     try:
         chunks, starts = split_audio(
             audio_path, os.path.join(work_dir, "chunks"), max_minutes=chunk_minutes,
-            progress=lambda p, lbl=None: report(p, lbl or "✂️ تکه‌بندی صدا…",
+            progress=lambda p, lbl=None: report(p, lbl or t("tr.progress.splitting"),
                                                10 + (p or 0) * 0.06),
             cancel_check=check_cancel)
     except Exception as e:
-        raise ProcessingError("تکه‌بندی صدا (ffmpeg)", str(e))
+        raise ProcessingError(t("tr.stage.split"), str(e))
     if not chunks:
-        raise ProcessingError("تکه‌بندی صدا", "هیچ تکه‌ای ساخته نشد.")
-    report(100, f"✂️ تکه‌بندی صدا ✦ ({len(chunks)} بخش {chunk_minutes} دقیقه‌ای)", 16)
+        raise ProcessingError(t("tr.stage.split"), t("tr.err.no_chunks"))
+    report(100, t("tr.progress.splitting_done", count=len(chunks), minutes=chunk_minutes), 16)
 
     chunk_srt_paths, windows = [], []
     total_chunks = len(chunks)
@@ -488,7 +492,8 @@ def transcribe_file(api_keys, input_path, work_dir, language="fa", output_format
         stage_pct = (i / max(1, total_chunks)) * 100
         overall = 16 + (i / max(1, total_chunks)) * 72
         icons = " ".join("✅" if j < i else ("🔄" if j == i else "▫️") for j in range(total_chunks))
-        label = f"🎙️ ترنسکرایب بخش {i + 1}/{total_chunks} ({engine})\n📄 {icons}"
+        label = t("tr.progress.transcribe_chunk", index=i + 1,
+                  total=total_chunks, engine=engine, icons=icons)
         report(stage_pct, label, overall)
         try:
             if provider == "gemini":
@@ -513,14 +518,16 @@ def transcribe_file(api_keys, input_path, work_dir, language="fa", output_format
             e.total = total_chunks
             raise
         except TranscriptionError as e:
-            raise ProcessingError(f"ترنسکرایب تکه {i + 1}/{total_chunks}", str(e))
+            raise ProcessingError(t("tr.stage.transcribe_chunk", index=i + 1,
+                                    total=total_chunks), str(e))
         except Exception as e:
-            raise ProcessingError(f"ترنسکرایب تکه {i + 1}/{total_chunks}", repr(e))
+            raise ProcessingError(t("tr.stage.transcribe_chunk", index=i + 1,
+                                    total=total_chunks), repr(e))
         with open(srt_path, "w", encoding="utf-8") as f:
             f.write(srt_content)
         chunk_srt_paths.append(srt_path)
         windows.append((starts[i], win_end))
-        report(100, f"✅ بخش {i + 1}/{total_chunks} ترنسکرایب شد",
+        report(100, t("tr.progress.chunk", index=i + 1, total=total_chunks),
                16 + ((i + 1) / max(1, total_chunks)) * 72)
     refined = 0
     if deep:
@@ -543,19 +550,19 @@ def transcribe_file(api_keys, input_path, work_dir, language="fa", output_format
         stats["language"] = locked_lang or language
 
     # Merge AFTER the audio-aware pass so the merge still owns the offsets/windows.
-    report(0, "🔗 ادغام تکه‌ها...", 95)
+    report(0, t("tr.progress.merging"), 95)
     try:
         merged = merge_srt_chunks(chunk_srt_paths, starts, windows)
     except Exception as e:
-        raise ProcessingError("ادغام تکه‌ها", str(e))
+        raise ProcessingError(t("tr.stage.merge"), str(e))
     check_cancel()
-    report(100, "🔗 ادغام تکه‌ها ✦", 97)
+    report(100, t("tr.progress.merging_done"), 97)
 
     # Text-only Gemini pass: only a fallback for when the audio pass could not run.
     if deep and not refined:
-        report(30, "🔬 پاس اصلاح عمیق (Gemini)...", 97)
+        report(30, t("tr.progress.deep_refine"), 97)
         merged = _refine_srt(merged, work_dir, report, refine_keys)
-        report(100, "🔬 پاس اصلاح عمیق ✦", 98)
+        report(100, t("tr.progress.deep_refine_done"), 98)
 
     results = {}
     out_dir_final = final_dir or work_dir
@@ -571,6 +578,6 @@ def transcribe_file(api_keys, input_path, work_dir, language="fa", output_format
                 f.write(srt_to_plain_text(merged) + "\n")
             results["txt"] = txt_out
     except Exception as e:
-        raise ProcessingError("نوشتن فایل خروجی", str(e))
-    report(100, "✅ فایل خروجی نوشته شد", 99)
+        raise ProcessingError(t("tr.stage.write_output"), str(e))
+    report(100, t("tr.progress.output_written"), 99)
     return results

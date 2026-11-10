@@ -15,6 +15,8 @@ import shutil
 import subprocess
 import threading
 
+from i18n import t
+
 FFMPEG = os.environ.get("ARION_FFMPEG", "ffmpeg")
 FFPROBE = os.environ.get("ARION_FFPROBE", "ffprobe")
 
@@ -36,9 +38,9 @@ def _run(cmd, timeout=None):
         return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
     except FileNotFoundError as exc:
         raise AudioError(
-            f"«{cmd[0]}» پیدا نشد؛ ffmpeg/ffprobe باید نصب و روی PATH باشد. ({exc})")
+            t("audio.err.tool_missing", tool=cmd[0], error=exc))
     except subprocess.TimeoutExpired:
-        raise AudioError("پردازش صدا بیش از حد طول کشید (timeout).")
+        raise AudioError(t("audio.err.timeout"))
 
 
 def get_duration(path):
@@ -95,7 +97,7 @@ def _progress_run(cmd, duration, progress=None, start_pct=0.0, end_pct=100.0,
         proc = subprocess.Popen(full, stdout=subprocess.PIPE,
                                 stderr=subprocess.PIPE, text=True, bufsize=1)
     except FileNotFoundError as exc:
-        raise AudioError(f"«{cmd[0]}» اجرا نشد: {exc}")
+        raise AudioError(t("audio.err.spawn_failed", tool=cmd[0], error=exc))
 
     err_lines = []
 
@@ -153,19 +155,19 @@ def _progress_run(cmd, duration, progress=None, start_pct=0.0, end_pct=100.0,
 def compress_to_mp3(src, dst=None, bitrate="64k", progress=None, cancel_check=None):
     """Convert any input media to mono 16 kHz mp3 (small + Whisper-friendly)."""
     if not os.path.exists(src):
-        raise AudioError(f"فایل ورودی پیدا نشد: {src}")
+        raise AudioError(t("audio.err.input_missing", path=src))
     if dst is None:
         dst = os.path.splitext(src)[0] + "_compressed.mp3"
     parent = os.path.dirname(os.path.abspath(dst))
     try:
         os.makedirs(parent, exist_ok=True)
     except OSError as exc:
-        raise AudioError(f"ساخت پوشه‌ی خروجی ناموفق بود: {parent}\n{exc}") from exc
+        raise AudioError(t("audio.err.mkdir_failed", path=parent, error=exc)) from exc
     tmp = dst + ".part.mp3"
     duration = get_duration(src)
     cmd = [FFMPEG, "-y", "-i", src, "-vn", "-acodec", "libmp3lame",
            "-ab", bitrate, "-ac", "1", "-ar", "16000", tmp]
-    rc, err = _progress_run(cmd, duration, progress, 0, 100, "🎛️ فشرده‌سازی صدا")
+    rc, err = _progress_run(cmd, duration, progress, 0, 100, t("audio.log.compressing"))
     if cancel_check:
         cancel_check()
     if rc != 0 or not os.path.exists(tmp) or os.path.getsize(tmp) == 0:
@@ -174,7 +176,7 @@ def compress_to_mp3(src, dst=None, bitrate="64k", progress=None, cancel_check=No
         except OSError:
             pass
         tail = (err or "").strip().splitlines()[-4:]
-        raise AudioError("ffmpeg نتوانست فایل را به mp3 تبدیل کند."
+        raise AudioError(t("audio.err.convert_failed")
                          + (("\n" + "\n".join(tail)) if tail else ""))
     os.replace(tmp, dst)
     return dst
@@ -187,7 +189,7 @@ def detect_silences(path, noise_db="-30dB", min_dur=0.5, duration=None,
            f"silencedetect=noise={noise_db}:d={min_dur}", "-f", "null", "-"]
     # silencedetect reports at info level, so this call must not use -loglevel error.
     _rc, err = _progress_run(cmd, duration or get_duration(path), progress,
-                             start_pct, end_pct, "🔎 پیدا کردن سکوت‌ها",
+                             start_pct, end_pct, t("audio.log.finding_silences"),
                              loglevel="info")
     starts = [float(x) for x in re.findall(r"silence_start:\s*(-?[\d.]+)", err)]
     ends = [float(x) for x in re.findall(r"silence_end:\s*(-?[\d.]+)", err)]
@@ -222,7 +224,7 @@ def split_audio(src, out_dir, max_minutes=20, progress=None, cancel_check=None,
     os.makedirs(out_dir, exist_ok=True)
     total = get_duration(src)
     if total <= 0:
-        raise AudioError("مدت فایل صوتی خوانده نشد (فایل سالم است؟).")
+        raise AudioError(t("audio.err.no_duration"))
     num_chunks = 1 if total / 60.0 <= max_minutes else math.ceil((total / 60.0) / max_minutes)
     num_chunks = max(1, num_chunks)
 
@@ -230,12 +232,12 @@ def split_audio(src, out_dir, max_minutes=20, progress=None, cancel_check=None,
         dst = os.path.join(out_dir, "chunk_000.mp3")
         cmd = [FFMPEG, "-y", "-i", src, "-acodec", "libmp3lame",
                "-ab", "64k", "-ac", "1", dst]
-        rc, err = _progress_run(cmd, total, progress, 0, 100, "✂️ آماده‌سازی صدا")
+        rc, err = _progress_run(cmd, total, progress, 0, 100, t("audio.log.preparing"))
         if cancel_check:
             cancel_check()
         if rc != 0 or not os.path.exists(dst) or os.path.getsize(dst) == 0:
             tail = (err or "").strip().splitlines()[-3:]
-            raise AudioError("ساخت تکه‌ی صوتی ناموفق بود."
+            raise AudioError(t("audio.err.split_failed")
                              + (("\n" + "\n".join(tail)) if tail else ""))
         return [dst], [0.0]
 
@@ -261,7 +263,7 @@ def split_audio(src, out_dir, max_minutes=20, progress=None, cancel_check=None,
         dst = os.path.join(out_dir, f"chunk_{len(chunks):03d}.mp3")
         lo = 18 + (82.0 * i / segments)
         hi = 18 + (82.0 * (i + 1) / segments)
-        label = f"✂️ تکه‌بندی صدا ({i + 1}/{segments})"
+        label = t("audio.log.splitting", current=i + 1, total=segments)
         cmd = [FFMPEG, "-y", "-ss", f"{start:.3f}", "-to", f"{end:.3f}",
                "-i", src, "-c", "copy", dst]
         rc, _err = _progress_run(cmd, end - start, progress, lo, hi, label)
@@ -275,6 +277,6 @@ def split_audio(src, out_dir, max_minutes=20, progress=None, cancel_check=None,
             chunks.append(dst)
             starts.append(float(start))
     if not chunks:
-        raise AudioError("هیچ تکه‌ی صوتی ساخته نشد.")
-    _emit(progress, 100, "✂️ تکه‌بندی صدا تمام شد")
+        raise AudioError(t("audio.err.no_chunks"))
+    _emit(progress, 100, t("audio.log.split_done"))
     return chunks, starts

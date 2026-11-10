@@ -147,7 +147,8 @@ class PipelineTests(unittest.TestCase):
         # Every update carries a human label; key notes come from the rotator.
         labels = [e[1] for e in events if len(e) > 1 and e[1]]
         self.assertTrue(all(isinstance(x, str) and x.strip() for x in labels))
-        self.assertTrue(any("ترنسکرایب بخش" in x for x in labels))
+        self.assertTrue(any("Transcribing chunk" in x for x in labels),
+                        f"no transcription chunk label in {labels[:5]}")
         self.assertIn("chunk_count", stats)
         self.assertEqual(stats["chunk_count"], 3)
         self.assertEqual(stats["chunks"], 3)

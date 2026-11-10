@@ -36,9 +36,11 @@ import webbrowser
 import customtkinter as ctk
 
 import engine
+import i18n
+from i18n import t
 
 APP_NAME = "Arion Studio"
-VERSION = "0.1.0a1"
+VERSION = "0.2.0a1"
 HERE = os.path.dirname(os.path.abspath(__file__))
 SETTINGS_PATH = os.path.join(HERE, "settings.json")
 LOG_DIR = os.path.join(HERE, "logs")
@@ -69,6 +71,7 @@ DEFAULTS = {
     "last_srt": "",
     "last_url": "",
     "download_kind": "video",
+    "language": i18n.DEFAULT_LANGUAGE,
 }
 
 # Families that ship Persian/Arabic glyphs *and* Latin, most attractive first.
@@ -76,6 +79,11 @@ FONT_CANDIDATES = (
     "Vazirmatn", "Vazir", "IRANSansX", "IRANSans", "Sahel", "Shabnam",
     "Segoe UI", "Tahoma", "Noto Sans Arabic", "Noto Naskh Arabic",
     "Arial Unicode MS", "DejaVu Sans", "Arial",
+)
+# Plain system families: enough for English, preferred when the UI is English.
+LATIN_FONT_CANDIDATES = (
+    "Segoe UI", "Inter", "Noto Sans", "DejaVu Sans", "Liberation Sans",
+    "Helvetica Neue", "Helvetica", "Arial",
 )
 UI_FAMILY = "Segoe UI"
 _FONT_REGISTRY = []
@@ -113,7 +121,7 @@ def fmt_duration(seconds):
     except (TypeError, ValueError):
         return "—"
     if seconds < 60:
-        return f"{seconds} ثانیه"
+        return t("ui.time.seconds", v1=seconds)
     m, s = divmod(seconds, 60)
     if m < 60:
         return f"{m}:{s:02d}"
@@ -142,13 +150,27 @@ def open_in_file_manager(path):
 
 # ------------------------------------------------------------------ fonts / DPI
 
-def choose_font_family(root):
-    """Pick a family that can render both Persian and Latin text."""
+
+def label_list(pairs):
+    """Display labels for an engine constant of (code, translation_key[, extra])."""
+    return [t(pair[1]) for pair in pairs]
+
+
+def label_map(pairs):
+    """Reverse lookup {display label: code} for an engine constant."""
+    return {t(pair[1]): pair[0] for pair in pairs}
+
+def choose_font_family(root, language=None):
+    """Pick a family that can render both the UI language and Latin text."""
     try:
         families = set(tkfont.families(root))
     except Exception:
         families = set()
-    for name in FONT_CANDIDATES:
+    if i18n.is_rtl(language):
+        preferred = FONT_CANDIDATES          # need Persian/Arabic glyphs
+    else:
+        preferred = LATIN_FONT_CANDIDATES + FONT_CANDIDATES
+    for name in preferred:
         if name in families:
             return name
     return "TkDefaultFont"
@@ -268,15 +290,15 @@ def attach_text_menu(ctk_widget, on_open=None):
     if inner is None:
         return
     menu = tk.Menu(inner, tearoff=0)
-    menu.add_command(label="برش", command=lambda: text_operation(inner, "cut"))
-    menu.add_command(label="کپی", command=lambda: text_operation(inner, "copy"))
-    menu.add_command(label="چسباندن", command=lambda: text_operation(inner, "paste"))
+    menu.add_command(label=t("ui.menu.cut"), command=lambda: text_operation(inner, "cut"))
+    menu.add_command(label=t("ui.menu.copy"), command=lambda: text_operation(inner, "copy"))
+    menu.add_command(label=t("ui.menu.paste"), command=lambda: text_operation(inner, "paste"))
     menu.add_separator()
-    menu.add_command(label="انتخاب همه",
+    menu.add_command(label=t("ui.menu.select_all"),
                      command=lambda: text_operation(inner, "select_all"))
     if on_open is not None:
         menu.add_separator()
-        menu.add_command(label="انتخاب فایل…", command=on_open)
+        menu.add_command(label=t("ui.menu.choose_file"), command=on_open)
 
     def _popup(event):
         try:
@@ -406,14 +428,16 @@ class ProgressPump:
 # ------------------------------------------------------------------ tab base
 
 class Tab(ctk.CTkFrame):
-    _START = "🚀 شروع"
+    #: Translation key of the "start" button; resolved in __init__ so the tab
+    #: can be rebuilt when the UI language changes.
+    _START_KEY = "ui.btn.start"
 
     def __init__(self, master, app):
         super().__init__(master, fg_color="transparent")
         self.app = app
         self.pump = ProgressPump(self)
         self._job = None
-        self._start_text = self._START
+        self._start_text = t(self._START_KEY)
         self._last_label = ""
         self._last_logged_pct = -100.0
         self.columnconfigure(0, weight=1)
@@ -429,7 +453,7 @@ class Tab(ctk.CTkFrame):
         head.grid(row=0, column=0, sticky="ew", padx=14, pady=(10, 2))
         head.columnconfigure(0, weight=1)
         self.status_lbl = ctk.CTkLabel(
-            head, text=title_hint or "آماده‌ام؛ یک کار بده 🙂",
+            head, text=title_hint or t("ui.status.idle_ready"),
             anchor="w", font=F(14, "bold"))
         self.status_lbl.grid(row=0, column=0, sticky="ew")
         self.percent_lbl = ctk.CTkLabel(head, text="0.0%", anchor="e",
@@ -456,9 +480,9 @@ class Tab(ctk.CTkFrame):
 
         foot = ctk.CTkFrame(card, fg_color="transparent")
         foot.grid(row=5, column=0, sticky="ew", padx=14, pady=(0, 10))
-        for text, cmd in (("📋 کپی لاگ", self.copy_log),
-                          ("🧹 پاک کردن", self.clear_log),
-                          ("💾 ذخیره‌ی لاگ", self.save_log)):
+        for text, cmd in ((t("ui.btn.copy_log"), self.copy_log),
+                          (t("ui.btn.clear_log"), self.clear_log),
+                          (t("ui.btn.save_log"), self.save_log)):
             ctk.CTkButton(foot, text=text, width=110, height=26, font=F(11),
                           fg_color="transparent", hover_color=("#ddd", "#333"),
                           border_width=1, command=cmd).pack(side="left", padx=(0, 6))
@@ -496,7 +520,7 @@ class Tab(ctk.CTkFrame):
             content = selected or inner.get("1.0", "end-1c")
             self.clipboard_clear()
             self.clipboard_append(content)
-            self.log("📋 لاگ در کلیپ‌بورد کپی شد.")
+            self.log(t("ui.log.log_copied"))
         except Exception:
             pass
 
@@ -506,17 +530,17 @@ class Tab(ctk.CTkFrame):
         except Exception:
             content = ""
         if not content.strip():
-            mb.showinfo(APP_NAME, "لاگ خالی است.", parent=self)
+            mb.showinfo(APP_NAME, t("ui.log.log_empty"), parent=self)
             return
         os.makedirs(LOG_DIR, exist_ok=True)
         path = os.path.join(LOG_DIR, f"arion-{time.strftime('%Y%m%d-%H%M%S')}.log")
         try:
             with open(path, "w", encoding="utf-8") as f:
                 f.write(content)
-            self.log(f"💾 لاگ ذخیره شد → {path}")
+            self.log(t("ui.log.log_saved", v1=path))
             open_in_file_manager(path)
         except Exception as exc:
-            mb.showerror(APP_NAME, f"ذخیره‌ی لاگ ناموفق بود:\n{exc}", parent=self)
+            mb.showerror(APP_NAME, t("ui.err.log_save_failed", v1=exc), parent=self)
 
     # ---- progress rendering ------------------------------------------------
     def _apply_snapshot(self, snap):
@@ -538,7 +562,7 @@ class Tab(ctk.CTkFrame):
 
         info = [f"⏱ {fmt_duration(snap.get('elapsed') or 0)}"]
         if snap.get("eta") is not None:
-            info.append(f"⏳ باقی‌مانده ~ {fmt_duration(snap['eta'])}")
+            info.append(t("ui.info.remaining", v1=fmt_duration(snap['eta'])))
         if snap.get("speed"):
             info.append(f"🚀 {snap['speed']}")
         if snap.get("note"):
@@ -556,7 +580,7 @@ class Tab(ctk.CTkFrame):
                 self._last_logged_pct = ov
                 self.log("• " + label.replace("\n", " — "))
 
-    def reset_progress(self, status="آماده‌ام؛ یک کار بده 🙂"):
+    def reset_progress(self, status=t("ui.status.idle_ready")):
         self._last_label = ""
         self._last_logged_pct = -100.0
         try:
@@ -617,10 +641,10 @@ class Tab(ctk.CTkFrame):
 
     def _on_cancelled(self):
         self.set_running(False)
-        self.log("⛔ کار لغو شد.")
+        self.log(t("ui.log.job_cancelled"))
         self.pump.push("progress", {
             "overall": self._job.overall if self._job else 0,
-            "label": "⛔ لغو شد", "elapsed": 0, "eta": None,
+            "label": t("ui.status.cancelled"), "elapsed": 0, "eta": None,
             "speed": "", "note": "",
         })
 
@@ -628,7 +652,7 @@ class Tab(ctk.CTkFrame):
         try:
             self.start_btn.configure(state="disabled" if running else "normal")
             self.cancel_btn.configure(state="normal" if running else "disabled")
-            self.start_btn.configure(text="⏳ در حال اجرا…" if running
+            self.start_btn.configure(text=t("ui.status.running") if running
                                      else self._start_text)
         except Exception:
             pass
@@ -637,25 +661,25 @@ class Tab(ctk.CTkFrame):
 
     def trigger_start(self):
         if self._job is not None and self._job.running:
-            self.log("⏳ یک کار در حال اجراست؛ اول لغو کن یا صبر کن.")
+            self.log(t("ui.err.job_running"))
             return
         try:
             self._start()
         except Exception as exc:
-            mb.showerror(APP_NAME, f"شروع کار ممکن نشد:\n{exc}", parent=self)
+            mb.showerror(APP_NAME, t("ui.err.start_failed", v1=exc), parent=self)
 
     def cancel(self):
         if self._job is not None and self._job.running:
             self._job.cancel()
-            self.log("⏳ درخواست لغو ارسال شد…")
+            self.log(t("ui.log.cancel_requested"))
         else:
-            self.log("کاری در حال اجرا نیست.")
+            self.log(t("ui.err.no_job_running"))
 
     def focus_first(self):
         pass
 
     # ---- helpers -----------------------------------------------------------
-    def _pick_out_dir(self, var, title="پوشه‌ی خروجی"):
+    def _pick_out_dir(self, var, title=t("ui.label.output_dir")):
         path = fd.askdirectory(parent=self, initialdir=var.get() or HERE,
                                title=title)
         if path:
@@ -670,19 +694,19 @@ class Tab(ctk.CTkFrame):
         if os.path.isdir(path):
             open_in_file_manager(path)
         else:
-            mb.showwarning(APP_NAME, f"پوشه وجود ندارد:\n{path}", parent=self)
+            mb.showwarning(APP_NAME, t("ui.err.folder_missing", v1=path), parent=self)
 
 
 # =============================== Transcribe =================================
 
 class TranscribeTab(Tab):
-    _START = "🚀 شروع ساخت زیرنویس"
+    _START_KEY = "ui.btn.start_transcribe"
 
     def __init__(self, master, app):
         super().__init__(master, app)
         self._build_control_card()
-        self._progress_block("آماده‌ی ساخت زیرنویس ✅")
-        self._start_text = self._START
+        self._progress_block(t("ui.status.transcribe_ready"))
+        self._start_text = t(self._START_KEY)
         self._sync_deep()
 
     def _build_control_card(self):
@@ -690,15 +714,15 @@ class TranscribeTab(Tab):
         card.grid(row=0, column=0, sticky="new", padx=2, pady=(0, 8))
         card.columnconfigure(0, weight=1)
 
-        ctk.CTkLabel(card, text="🎬 ساخت زیرنویس (SRT / TXT) از فایل یا لینک یوتیوب",
+        ctk.CTkLabel(card, text=t("ui.title.transcribe_tab"),
                      font=F(15, "bold"), anchor="w").grid(
             row=0, column=0, columnspan=3, sticky="ew", padx=12, pady=(10, 6))
 
         self.seg = ctk.CTkSegmentedButton(
-            card, values=["📁 فایل محلی", "📺 لینک یوتیوب"],
+            card, values=[t("ui.seg.local_file"), t("ui.seg.youtube_link")],
             command=self._switch_source, font=F(12))
-        self.seg.set("📁 فایل محلی" if self.app.settings["transcribe_source"] == "file"
-                     else "📺 لینک یوتیوب")
+        self.seg.set(t("ui.seg.local_file") if self.app.settings["transcribe_source"] == "file"
+                     else t("ui.seg.youtube_link"))
         self.seg.grid(row=1, column=0, columnspan=3, sticky="ew", padx=12, pady=(0, 8))
 
         # file row
@@ -707,9 +731,9 @@ class TranscribeTab(Tab):
         self.path_var = tk.StringVar(value=self.app.settings.get("last_file", ""))
         self.path_entry = make_entry(
             self.file_row, textvariable=self.path_var, on_open=self._pick_file,
-            placeholder_text="مسیر ویدیو/صدا (mp4, mkv, mp3, wav, m4a, …)")
+            placeholder_text=t("ui.placeholder.media_path"))
         self.path_entry.grid(row=0, column=0, sticky="ew")
-        ctk.CTkButton(self.file_row, text="انتخاب فایل…", width=110, font=F(12),
+        ctk.CTkButton(self.file_row, text=t("ui.menu.choose_file"), width=110, font=F(12),
                       command=self._pick_file).grid(row=0, column=1, padx=(8, 0))
         self.path_entry.bind("<Return>", lambda _e: self.trigger_start())
 
@@ -721,7 +745,7 @@ class TranscribeTab(Tab):
             self.url_row, textvariable=self.url_var,
             placeholder_text="https://www.youtube.com/watch?v=…")
         self.url_entry.grid(row=0, column=0, sticky="ew")
-        ctk.CTkButton(self.url_row, text="⚖️ تخمین حجم", width=110, font=F(12),
+        ctk.CTkButton(self.url_row, text=t("ui.btn.estimate_size"), width=110, font=F(12),
                       command=self._check_url).grid(row=0, column=1, padx=(8, 0))
         self.url_entry.bind("<Return>", lambda _e: self.trigger_start())
 
@@ -731,10 +755,10 @@ class TranscribeTab(Tab):
         for i in range(4):
             row.columnconfigure(i, weight=1, uniform="ropt")
         for col, (text, values, attr) in enumerate([
-                ("زبان", [lbl for _, lbl in engine.LANGUAGES], "lang_menu"),
-                ("استایل زیرنویس", [lbl for _, lbl in engine.SUBTITLE_STYLES], "style_menu"),
-                ("فرمت خروجی", ["SRT", "TXT", "SRT + TXT"], "fmt_menu"),
-                ("موتور تشخیص", [lbl for _, lbl in engine.PROVIDERS], "prov_menu")]):
+                (t("ui.label.language"), label_list(engine.LANGUAGES), "lang_menu"),
+                (t("ui.label.subtitle_style"), label_list(engine.SUBTITLE_STYLES), "style_menu"),
+                (t("ui.label.output_format"), ["SRT", "TXT", "SRT + TXT"], "fmt_menu"),
+                (t("ui.label.engine"), label_list(engine.PROVIDERS), "prov_menu")]):
             ctk.CTkLabel(row, text=text, anchor="w", font=F(12)).grid(
                 row=0, column=col, sticky="ew", padx=(0 if col == 0 else 6, 0))
             menu = ctk.CTkOptionMenu(row, values=values, font=F(12),
@@ -749,7 +773,7 @@ class TranscribeTab(Tab):
         row2 = ctk.CTkFrame(card, fg_color="transparent")
         row2.grid(row=4, column=0, columnspan=3, sticky="ew", padx=12, pady=(8, 0))
         row2.columnconfigure(1, weight=1)
-        ctk.CTkLabel(row2, text="پوشه‌ی خروجی", font=F(12)).grid(
+        ctk.CTkLabel(row2, text=t("ui.label.output_dir"), font=F(12)).grid(
             row=0, column=0, sticky="w", padx=(0, 6))
         self.out_var = tk.StringVar(value=self.app.settings["out_dir"])
         make_entry(row2, textvariable=self.out_var).grid(row=0, column=1, sticky="ew")
@@ -763,36 +787,36 @@ class TranscribeTab(Tab):
         row3 = ctk.CTkFrame(card, fg_color="transparent")
         row3.grid(row=5, column=0, columnspan=3, sticky="ew", padx=12, pady=(6, 0))
         row3.columnconfigure(1, weight=1)
-        ctk.CTkLabel(row3, text="🍪 کوکی (اختیاری)", font=F(12)).grid(
+        ctk.CTkLabel(row3, text=t("ui.label.cookies_optional"), font=F(12)).grid(
             row=0, column=0, sticky="w", padx=(0, 6))
         self.cookie_var = tk.StringVar(value=self.app.settings.get("cookies", ""))
         make_entry(row3, textvariable=self.cookie_var,
-                   placeholder_text="cookies.txt — برای ویدیوهای محدود").grid(
+                   placeholder_text=t("ui.placeholder.cookies_limited")).grid(
             row=0, column=1, sticky="ew")
         ctk.CTkButton(row3, text="…", width=34, font=F(12),
                       command=self._pick_cookie).grid(row=0, column=2, padx=(6, 0))
 
         self.deep_var = tk.BooleanVar(value=False)
         self.deep_chk = ctk.CTkCheckBox(
-            card, text="✨ حالت عمیق (Gemini صدا را می‌شنود و زیرنویس را بازنویسی می‌کند)",
+            card, text=t("ui.check.deep_mode"),
             variable=self.deep_var, font=F(12), command=self._sync_deep)
         self.deep_chk.grid(row=6, column=0, columnspan=3, sticky="w",
                            padx=12, pady=(8, 0))
 
         act = ctk.CTkFrame(card, fg_color="transparent")
         act.grid(row=7, column=0, columnspan=3, sticky="ew", padx=12, pady=(10, 12))
-        self.start_btn = ctk.CTkButton(act, text=self._START, height=38, width=190,
+        self.start_btn = ctk.CTkButton(act, text=self._start_text, height=38, width=190,
                                        font=F(13, "bold"), fg_color=ACCENT,
                                        hover_color=ACCENT_HOVER, command=self._start)
         self.start_btn.pack(side="right")
-        self.cancel_btn = ctk.CTkButton(act, text="⛔ لغو", height=38, width=90,
+        self.cancel_btn = ctk.CTkButton(act, text=t("ui.btn.cancel"), height=38, width=90,
                                         font=F(12), fg_color=DANGER,
                                         hover_color=DANGER_HOVER,
                                         command=self.cancel, state="disabled")
         self.cancel_btn.pack(side="right", padx=(0, 8))
 
-        self._switch_source("📁 فایل محلی" if self.app.settings["transcribe_source"] == "file"
-                            else "📺 لینک یوتیوب")
+        self._switch_source(t("ui.seg.local_file") if self.app.settings["transcribe_source"] == "file"
+                            else t("ui.seg.youtube_link"))
 
     # ---- interactions ------------------------------------------------------
     def _switch_source(self, choice):
@@ -808,43 +832,43 @@ class TranscribeTab(Tab):
                               padx=12, pady=2)
 
     def _sync_deep(self, *_):
-        uses_gemini = self.prov_menu.get() == engine.PROVIDERS[1][1]
+        uses_gemini = self.prov_menu.get() == t(engine.PROVIDERS[1][1])
         try:
             self.deep_chk.configure(state="normal" if uses_gemini else "disabled")
         except Exception:
             pass
         if not uses_gemini and self.deep_var.get():
             self.deep_var.set(False)
-            self.log("ℹ️ حالت عمیق فقط با موتور Gemini کار می‌کند؛ غیرفعال شد.")
+            self.log(t("ui.log.deep_needs_gemini"))
 
     def _pick_file(self):
         path = fd.askopenfilename(
-            parent=self, title="فایل ویدیو/صدا",
+            parent=self, title=t("ui.dialog.media_files"),
             filetypes=[("Media", "*.mp4 *.mkv *.mov *.avi *.webm *.mp3 *.wav "
                                   "*.m4a *.opus *.ogg *.aac *.flac"),
-                       ("همه فایل‌ها", "*.*")])
+                       (t("ui.dialog.all_files"), "*.*")])
         if path:
             self.path_var.set(path)
             self.app.settings["last_file"] = path
             save_settings(self.app.settings)
-            self.log(f"📁 فایل انتخاب شد: {os.path.basename(path)}")
+            self.log(t("ui.log.file_selected", v1=os.path.basename(path)))
 
     def _pick_cookie(self):
         path = fd.askopenfilename(parent=self, initialdir=HERE,
                                   filetypes=[("cookies.txt", "*.txt"),
-                                             ("همه", "*.*")])
+                                             (t("ui.dialog.all"), "*.*")])
         if path:
             self.cookie_var.set(path)
             self.app.settings["cookies"] = path
             save_settings(self.app.settings)
-            self.log(f"🍪 کوکی انتخاب شد: {path}")
+            self.log(t("ui.log.cookies_selected", v1=path))
 
     def _check_url(self):
         url = self.url_var.get().strip()
         if not url:
-            mb.showwarning(APP_NAME, "لینک یوتیوب را وارد کن.", parent=self)
+            mb.showwarning(APP_NAME, t("ui.err.need_youtube_link"), parent=self)
             return
-        self.status_lbl.configure(text="⏳ در حال تخمین حجم و مدت…")
+        self.status_lbl.configure(text=t("ui.status.estimating_duration"))
         self.percent_lbl.configure(text="…")
         cookies = self.cookie_var.get().strip()
 
@@ -853,12 +877,12 @@ class TranscribeTab(Tab):
 
         def done(result, err):
             if err:
-                self.status_lbl.configure(text="⚠️ تخمین حجم ناموفق")
+                self.status_lbl.configure(text=t("ui.status.estimate_failed"))
                 self.percent_lbl.configure(text="0.0%")
-                self.log(f"⛔ تخمین حجم: {err}")
+                self.log(t("ui.err.estimate_failed", v1=err))
                 return
             text = self._format_sizes(result)
-            self.status_lbl.configure(text=text or "— چیزی پیدا نشد")
+            self.status_lbl.configure(text=text or t("ui.label.nothing_found"))
             self.percent_lbl.configure(text="0.0%")
             self.log(f"📊 {text}")
 
@@ -868,7 +892,7 @@ class TranscribeTab(Tab):
     def _format_sizes(result):
         result = result or {}
         video = result.get("video") or {}
-        parts = [f"{engine.DL_VIDEO_LABELS.get(k, k)}: {v}MB"
+        parts = [f"{t(engine.DL_VIDEO_LABELS.get(k, k))}: {v}MB"
                  for k, v in video.items() if v]
         dur = result.get("duration") or 0
         head = f"⏱ {fmt_duration(dur)}  |  " if dur else ""
@@ -880,7 +904,7 @@ class TranscribeTab(Tab):
         try:
             os.makedirs(out_dir, exist_ok=True)
         except Exception as exc:
-            mb.showerror(APP_NAME, f"ساخت پوشه‌ی خروجی ناموفق بود:\n{exc}",
+            mb.showerror(APP_NAME, t("ui.err.out_dir_create_failed", v1=exc),
                          parent=self)
             return
         self.app.settings["out_dir"] = out_dir
@@ -889,45 +913,44 @@ class TranscribeTab(Tab):
         if source == "file":
             path = self.path_var.get().strip()
             if not path or not os.path.exists(path):
-                mb.showerror(APP_NAME, "فایل ورودی پیدا نشد.", parent=self)
+                mb.showerror(APP_NAME, t("ui.err.input_missing"), parent=self)
                 return
             self.app.settings["last_file"] = path
             payload = ("file", path)
         else:
             url = self.url_var.get().strip()
             if "youtube.com" not in url and "youtu.be" not in url:
-                mb.showerror(APP_NAME, "لینک یوتیوب معتبر نیست.", parent=self)
+                mb.showerror(APP_NAME, t("ui.err.bad_youtube_link"), parent=self)
                 return
             self.app.settings["last_url"] = url
             payload = ("url", url)
 
-        lang_code = {lbl: code for code, lbl in engine.LANGUAGES}[self.lang_menu.get()]
-        style_code = {lbl: code for code, lbl in engine.SUBTITLE_STYLES}[self.style_menu.get()]
+        lang_code = label_map(engine.LANGUAGES)[self.lang_menu.get()]
+        style_code = label_map(engine.SUBTITLE_STYLES)[self.style_menu.get()]
         fmt = {"SRT": "srt", "TXT": "txt", "SRT + TXT": "both"}[self.fmt_menu.get()]
-        prov = {lbl: code for code, lbl in engine.PROVIDERS}[self.prov_menu.get()]
+        prov = label_map(engine.PROVIDERS)[self.prov_menu.get()]
         deep = bool(self.deep_var.get()) and prov == "gemini"
         cookies = self.cookie_var.get().strip()
 
         groq = engine.groq_keys(self.app.settings.get("groq_key"))
         gem = engine.gemini_keys(self.app.settings.get("gemini_key"))
         if prov == "groq" and not groq:
-            mb.showerror(APP_NAME, "برای Groq اول کلید API را در تب «تنظیمات» بگذار.",
+            mb.showerror(APP_NAME, t("ui.err.need_groq_key"),
                          parent=self)
             return
         if prov == "gemini" and not gem:
-            mb.showerror(APP_NAME, "برای Gemini اول کلید API را در تب «تنظیمات» بگذار.",
+            mb.showerror(APP_NAME, t("ui.err.need_gemini_key"),
                          parent=self)
             return
         if deep and not gem:
-            mb.showerror(APP_NAME, "حالت عمیق به کلید Gemini نیاز دارد.", parent=self)
+            mb.showerror(APP_NAME, t("ui.err.deep_needs_gemini_key"), parent=self)
             return
 
         save_settings(self.app.settings)
         job = self.make_job()
         self.set_running(True)
-        self.reset_progress("⏳ شروع پردازش…")
-        self.log(f"▶️ شروع؛ منبع={source}  موتور={prov}  زبان={lang_code}  "
-                 f"فرمت={fmt}  عمیق={'بله' if deep else 'خیر'}")
+        self.reset_progress(t("ui.status.starting"))
+        self.log(t("ui.log.job_started", v1=source, v2=prov, v3=lang_code, v4=fmt, v5=t("ui.value.yes") if deep else t("ui.value.no")))
 
         def work():
             if payload[0] == "file":
@@ -944,18 +967,18 @@ class TranscribeTab(Tab):
         def done(result, err):
             self.set_running(False)
             if err:
-                self.status_lbl.configure(text="❌ کار ناموفق بود")
+                self.status_lbl.configure(text=t("ui.status.failed"))
                 self.log(f"❌ {err}")
                 mb.showerror(APP_NAME, str(err), parent=self)
                 return
             paths = [p for p in (result or {}).values() if p]
             names = ", ".join(os.path.basename(p) for p in paths)
-            self.status_lbl.configure(text=f"✅ تمام شد: {names}")
+            self.status_lbl.configure(text=t("ui.status.done", v1=names))
             self.percent_lbl.configure(text="100.0%")
             self.overall_bar.set(1)
-            self.log(f"✅ فایل‌های ساخته‌شده در: {out_dir}")
+            self.log(t("ui.log.files_in", v1=out_dir))
             mb.showinfo(APP_NAME,
-                        f"زیرنویس ساخته شد:\n{names}\n\nپوشه:\n{out_dir}",
+                        t("ui.dialog.transcribe_done", v1=names, v2=out_dir),
                         parent=self)
 
         self.start_worker(work, done)
@@ -971,30 +994,31 @@ class TranscribeTab(Tab):
 # =============================== Download ===================================
 
 class DownloadTab(Tab):
-    _START = "🚀 شروع دانلود"
-    SUB_LANGS = ["🌐 اصلی (original)", "🇮🇷 فارسی", "🇬🇧 انگلیسی", "🇩🇪 آلمانی",
-                 "🇸🇦 عربی", "🇹🇷 ترکی", "🇷🇺 روسی", "🇫🇷 فرانسوی", "🇪🇸 اسپانیایی"]
+    _START_KEY = "ui.btn.start_download"
+    SUB_LANG_KEYS = ["ui.lang.original", "ui.lang.fa", "ui.lang.en", "ui.lang.de",
+                     "ui.lang.ar", "ui.lang.tr", "ui.lang.ru", "ui.lang.fr", "ui.lang.es"]
+    SUB_LANG_CODES = [None, "fa", "en", "de", "ar", "tr", "ru", "fr", "es"]
 
     def __init__(self, master, app):
         super().__init__(master, app)
         self.kind = app.settings.get("download_kind", "video")
         self._kind_default = None
         self._build_control_card()
-        self._progress_block("آماده‌ی دانلود ✅")
-        self._start_text = self._START
+        self._progress_block(t("ui.status.download_ready"))
+        self._start_text = t(self._START_KEY)
 
     def _build_control_card(self):
         card = ctk.CTkFrame(self, corner_radius=12)
         card.grid(row=0, column=0, sticky="new", padx=2, pady=(0, 8))
         card.columnconfigure(0, weight=1)
 
-        ctk.CTkLabel(card, text="📺 دانلود از یوتیوب  (ویدیو · صدا · زیرنویس · مشخصات TXT)",
+        ctk.CTkLabel(card, text=t("ui.title.download_tab"),
                      font=F(15, "bold"), anchor="w").grid(
             row=0, column=0, columnspan=3, sticky="ew", padx=12, pady=(10, 6))
 
         self.url_var = tk.StringVar(value=self.app.settings.get("last_url", ""))
         self.url_entry = make_entry(card, textvariable=self.url_var,
-                                    placeholder_text="لینک یوتیوب…")
+                                    placeholder_text=t("ui.placeholder.youtube_link"))
         self.url_entry.grid(row=1, column=0, columnspan=3, sticky="ew",
                             padx=12, pady=(0, 8))
         self.url_entry.bind("<Return>", lambda _e: self.trigger_start())
@@ -1004,8 +1028,8 @@ class DownloadTab(Tab):
         for i in range(4):
             row.columnconfigure(i, weight=1, uniform="kct")
         self.kind_btns = {}
-        for i, (code, lbl) in enumerate([("video", "🎬 ویدیو"), ("audio", "🎧 صدا"),
-                                         ("subs", "💬 زیرنویس"), ("txt", "📄 TXT")]):
+        for i, (code, lbl) in enumerate([("video", t("ui.kind.video")), ("audio", t("ui.kind.audio")),
+                                         ("subs", t("ui.kind.subs")), ("txt", "📄 TXT")]):
             btn = ctk.CTkButton(row, text=lbl, height=30, corner_radius=8, font=F(12),
                                 command=lambda c=code: self._set_kind(c))
             btn.grid(row=0, column=i, sticky="ew", padx=(0 if i == 0 else 6, 0))
@@ -1016,12 +1040,12 @@ class DownloadTab(Tab):
         qual_row = ctk.CTkFrame(card, fg_color="transparent")
         qual_row.grid(row=3, column=0, columnspan=3, sticky="ew", padx=12)
         qual_row.columnconfigure(0, weight=1)
-        ctk.CTkLabel(qual_row, text="کیفیت / فرمت / زبان", anchor="w",
+        ctk.CTkLabel(qual_row, text=t("ui.label.quality_format_lang"), anchor="w",
                      font=F(12)).grid(row=0, column=0, sticky="ew")
         self.quality_menu = ctk.CTkOptionMenu(
-            qual_row, values=[lbl for _, lbl in engine.DL_VIDEO_QUALITIES],
+            qual_row, values=label_list(engine.DL_VIDEO_QUALITIES),
             font=F(12), dropdown_font=F(12), command=self._quality_changed)
-        self.quality_menu.set(engine.DL_VIDEO_QUALITIES[0][1])
+        self.quality_menu.set(t(engine.DL_VIDEO_QUALITIES[0][1]))
         self.quality_menu.grid(row=1, column=0, columnspan=2, sticky="ew")
 
         size_row = ctk.CTkFrame(card, fg_color="transparent")
@@ -1030,18 +1054,18 @@ class DownloadTab(Tab):
         self.size_label = ctk.CTkLabel(size_row, text="", anchor="w", font=F(11),
                                        text_color=MUTED)
         self.size_label.grid(row=0, column=0, sticky="ew")
-        self.probe_btn = ctk.CTkButton(size_row, text="⚖️ تخمین حجم", width=110,
+        self.probe_btn = ctk.CTkButton(size_row, text=t("ui.btn.estimate_size"), width=110,
                                        font=F(12), command=self._probe)
         self.probe_btn.grid(row=0, column=1, padx=(6, 0))
 
         ck = ctk.CTkFrame(card, fg_color="transparent")
         ck.grid(row=5, column=0, columnspan=3, sticky="ew", padx=12, pady=(6, 0))
         ck.columnconfigure(1, weight=1)
-        ctk.CTkLabel(ck, text="🍪 کوکی", font=F(12)).grid(row=0, column=0,
+        ctk.CTkLabel(ck, text=t("ui.label.cookies"), font=F(12)).grid(row=0, column=0,
                                                           sticky="w", padx=(0, 6))
         self.cookie_var = tk.StringVar(value=self.app.settings.get("cookies", ""))
         make_entry(ck, textvariable=self.cookie_var,
-                   placeholder_text="cookies.txt — برای ویدیوهای سن/محتوا محدود").grid(
+                   placeholder_text=t("ui.placeholder.cookies_age")).grid(
             row=0, column=1, sticky="ew")
         ctk.CTkButton(ck, text="…", width=34, font=F(12),
                       command=self._pick_cookie).grid(row=0, column=2, padx=(6, 0))
@@ -1049,30 +1073,30 @@ class DownloadTab(Tab):
         out = ctk.CTkFrame(card, fg_color="transparent")
         out.grid(row=6, column=0, columnspan=3, sticky="ew", padx=12, pady=(6, 0))
         out.columnconfigure(1, weight=1)
-        ctk.CTkLabel(out, text="پوشه‌ی ذخیره", font=F(12)).grid(row=0, column=0,
+        ctk.CTkLabel(out, text=t("ui.label.save_folder"), font=F(12)).grid(row=0, column=0,
                                                                sticky="w", padx=(0, 6))
         self.out_var = tk.StringVar(value=self.app.settings["out_dir"])
         make_entry(out, textvariable=self.out_var).grid(row=0, column=1, sticky="ew")
         ctk.CTkButton(out, text="…", width=34, font=F(12),
                       command=lambda: self._pick_out_dir(self.out_var,
-                                                         "پوشه‌ی ذخیره")
+                                                         t("ui.label.save_folder"))
                       ).grid(row=0, column=2, padx=(6, 0))
         ctk.CTkButton(out, text="📂", width=34, font=F(12),
                       command=lambda: self._open_out_dir(self.out_var)
                       ).grid(row=0, column=3, padx=(6, 0))
 
-        ctk.CTkButton(card, text="🛠 تنظیم پروکسی", width=200, height=26, font=F(11),
+        ctk.CTkButton(card, text=t("ui.btn.proxy_settings"), width=200, height=26, font=F(11),
                       fg_color="#555", hover_color="#666",
                       command=self.app.show_proxy_dialog).grid(
             row=7, column=0, columnspan=3, sticky="w", padx=12, pady=(8, 0))
 
         act = ctk.CTkFrame(card, fg_color="transparent")
         act.grid(row=8, column=0, columnspan=3, sticky="ew", padx=12, pady=(10, 12))
-        self.start_btn = ctk.CTkButton(act, text=self._START, height=38, width=150,
+        self.start_btn = ctk.CTkButton(act, text=self._start_text, height=38, width=150,
                                        font=F(13, "bold"), fg_color=ACCENT,
                                        hover_color=ACCENT_HOVER, command=self._start)
         self.start_btn.pack(side="right")
-        self.cancel_btn = ctk.CTkButton(act, text="⛔ لغو", height=38, width=90,
+        self.cancel_btn = ctk.CTkButton(act, text=t("ui.btn.cancel"), height=38, width=90,
                                         font=F(12), fg_color=DANGER,
                                         hover_color=DANGER_HOVER,
                                         command=self.cancel, state="disabled")
@@ -1081,6 +1105,16 @@ class DownloadTab(Tab):
         self._set_kind(self.kind)
 
     # ---- interactions ------------------------------------------------------
+    def _sub_langs(self):
+        """Subtitle language labels for the current UI language."""
+        return [t(key) for key in self.SUB_LANG_KEYS]
+
+    def _sub_lang_code(self, label):
+        for key, code in zip(self.SUB_LANG_KEYS, self.SUB_LANG_CODES):
+            if t(key) == label:
+                return code
+        return None
+
     def _set_kind(self, code):
         self.kind = code
         self.app.settings["download_kind"] = code
@@ -1088,27 +1122,27 @@ class DownloadTab(Tab):
             b.configure(fg_color=ACCENT if c == code else self._kind_default)
         menu = self.quality_menu
         if code == "video":
-            menu.configure(values=[lbl for _, lbl in engine.DL_VIDEO_QUALITIES])
-            menu.set(engine.DL_VIDEO_QUALITIES[0][1])
+            menu.configure(values=label_list(engine.DL_VIDEO_QUALITIES))
+            menu.set(t(engine.DL_VIDEO_QUALITIES[0][1]))
             self.probe_btn.configure(state="normal")
             self.size_label.configure(
-                text="کیفیت را انتخاب کن؛ «تخمین حجم» سایز هر گزینه را می‌دهد.")
+                text=t("ui.hint.choose_quality"))
         elif code == "audio":
-            menu.configure(values=[lbl for _, lbl in engine.DL_AUDIO_QUALITIES])
-            menu.set(engine.DL_AUDIO_QUALITIES[0][1])
+            menu.configure(values=label_list(engine.DL_AUDIO_QUALITIES))
+            menu.set(t(engine.DL_AUDIO_QUALITIES[0][1]))
             self.probe_btn.configure(state="normal")
-            self.size_label.configure(text="فرمت صدا را انتخاب کن.")
+            self.size_label.configure(text=t("ui.hint.choose_audio_format"))
         elif code == "subs":
-            menu.configure(values=self.SUB_LANGS)
-            menu.set(self.SUB_LANGS[0])
+            menu.configure(values=self._sub_langs())
+            menu.set(self._sub_langs()[0])
             self.probe_btn.configure(state="disabled")
             self.size_label.configure(
-                text="زیرنویس آماده‌ی یوتیوب دریافت می‌شود (اگر موجود باشد).")
+                text=t("ui.hint.subs_available"))
         else:
             menu.configure(values=["—"])
             menu.set("—")
             self.probe_btn.configure(state="disabled")
-            self.size_label.configure(text="عنوان، مشخصات و توضیحات در یک فایل TXT.")
+            self.size_label.configure(text=t("ui.hint.info_txt"))
 
     def _quality_changed(self, _value):
         pass
@@ -1116,19 +1150,19 @@ class DownloadTab(Tab):
     def _pick_cookie(self):
         path = fd.askopenfilename(parent=self, initialdir=HERE,
                                   filetypes=[("cookies.txt", "*.txt"),
-                                             ("همه", "*.*")])
+                                             (t("ui.dialog.all"), "*.*")])
         if path:
             self.cookie_var.set(path)
             self.app.settings["cookies"] = path
             save_settings(self.app.settings)
-            self.log(f"🍪 کوکی انتخاب شد: {path}")
+            self.log(t("ui.log.cookies_selected", v1=path))
 
     def _probe(self):
         url = self.url_var.get().strip()
         if "youtube.com" not in url and "youtu.be" not in url:
-            mb.showwarning(APP_NAME, "اول یک لینک یوتیوب معتبر وارد کن.", parent=self)
+            mb.showwarning(APP_NAME, t("ui.err.need_valid_link"), parent=self)
             return
-        self.size_label.configure(text="⏳ در حال تخمین حجم…")
+        self.size_label.configure(text=t("ui.status.estimating"))
         cookies = self.cookie_var.get().strip()
         kind = self.kind
 
@@ -1137,25 +1171,25 @@ class DownloadTab(Tab):
 
         def done(result, err):
             if err:
-                self.size_label.configure(text="⚠️ تخمین ناموفق")
-                self.log(f"⛔ تخمین حجم: {err}")
+                self.size_label.configure(text=t("ui.status.estimate_failed_short"))
+                self.log(t("ui.err.estimate_failed", v1=err))
                 return
             result = result or {}
             if kind == "video":
                 video = result.get("video") or {}
-                parts = [f"{engine.DL_VIDEO_LABELS.get(k, k)}: {v}MB"
+                parts = [f"{t(engine.DL_VIDEO_LABELS.get(k, k))}: {v}MB"
                          for k, v in video.items() if v]
-                text = "  |  ".join(parts[:5]) or "— چیزی پیدا نشد"
+                text = "  |  ".join(parts[:5]) or t("ui.label.nothing_found")
             else:
                 audio = result.get("audio") or {}
-                parts = [f"{engine.DL_AUDIO_LABELS.get(k, k)}: {v}MB"
+                parts = [f"{t(engine.DL_AUDIO_LABELS.get(k, k))}: {v}MB"
                          for k, v in audio.items() if v]
-                text = "  |  ".join(parts) or "— چیزی پیدا نشد"
+                text = "  |  ".join(parts) or t("ui.label.nothing_found")
             dur = result.get("duration") or 0
             if dur:
                 text = f"⏱ {fmt_duration(dur)}  |  " + text
             self.size_label.configure(text=text)
-            self.log(f"📊 تخمین حجم: {text}")
+            self.log(t("ui.log.size_estimate", v1=text))
 
         self.start_worker(work, done)
 
@@ -1163,13 +1197,13 @@ class DownloadTab(Tab):
     def _start(self):
         url = self.url_var.get().strip()
         if "youtube.com" not in url and "youtu.be" not in url:
-            mb.showerror(APP_NAME, "لینک یوتیوب معتبر نیست.", parent=self)
+            mb.showerror(APP_NAME, t("ui.err.bad_youtube_link"), parent=self)
             return
         out_dir = self.out_var.get().strip() or self.app.settings["out_dir"]
         try:
             os.makedirs(out_dir, exist_ok=True)
         except Exception as exc:
-            mb.showerror(APP_NAME, f"ساخت پوشه‌ی ذخیره ناموفق بود:\n{exc}", parent=self)
+            mb.showerror(APP_NAME, t("ui.err.save_dir_create_failed", v1=exc), parent=self)
             return
         self.app.settings["out_dir"] = out_dir
         self.app.settings["last_url"] = url
@@ -1179,20 +1213,17 @@ class DownloadTab(Tab):
         kind = self.kind
         choice = self.quality_menu.get()
 
-        video_map = {lbl: code for code, lbl in engine.DL_VIDEO_QUALITIES}
-        audio_map = {lbl: code for code, lbl in engine.DL_AUDIO_QUALITIES}
-        lang_map = {
-            "🌐 اصلی (original)": None, "🇮🇷 فارسی": "fa", "🇬🇧 انگلیسی": "en",
-            "🇩🇪 آلمانی": "de", "🇸🇦 عربی": "ar", "🇹🇷 ترکی": "tr",
-            "🇷🇺 روسی": "ru", "🇫🇷 فرانسوی": "fr", "🇪🇸 اسپانیایی": "es",
-        }
+        video_map = label_map(engine.DL_VIDEO_QUALITIES)
+        audio_map = label_map(engine.DL_AUDIO_QUALITIES)
+        lang_map = {t(key): code
+                    for key, code in zip(self.SUB_LANG_KEYS, self.SUB_LANG_CODES)}
         quality = video_map.get(choice) or audio_map.get(choice) or "best"
 
         save_settings(self.app.settings)
         job = self.make_job()
         self.set_running(True)
-        self.reset_progress("⏳ شروع دانلود…")
-        self.log(f"▶️ شروع دانلود؛ نوع={kind}  انتخاب={choice}")
+        self.reset_progress(t("ui.status.download_starting"))
+        self.log(t("ui.log.download_started", v1=kind, v2=choice))
 
         def work():
             if kind == "subs":
@@ -1207,7 +1238,7 @@ class DownloadTab(Tab):
         def done(result, err):
             self.set_running(False)
             if err:
-                self.status_lbl.configure(text="❌ دانلود ناموفق بود")
+                self.status_lbl.configure(text=t("ui.status.download_failed"))
                 self.log(f"❌ {err}")
                 mb.showerror(APP_NAME, str(err), parent=self)
                 return
@@ -1216,18 +1247,18 @@ class DownloadTab(Tab):
             if kind == "subs" and isinstance(result, tuple) and len(result) == 4:
                 path, target, sub_kind, title = result
                 self.status_lbl.configure(
-                    text=f"✅ زیرنویس ({target}): {os.path.basename(path)}")
-                self.log(f"✅ زیرنویس «{title}» ({target} — {sub_kind}) → {path}")
+                    text=t("ui.log.subtitle_saved", v1=target, v2=os.path.basename(path)))
+                self.log(t("ui.log.subtitle_titled", v1=title, v2=target, v3=sub_kind, v4=path))
                 open_in_file_manager(path)
                 return
             if kind == "txt" and isinstance(result, tuple) and len(result) == 2:
                 path, title = result
                 self.status_lbl.configure(text=f"✅ TXT: {os.path.basename(path)}")
-                self.log(f"✅ مشخصات «{title}» → {path}")
+                self.log(t("ui.log.info_saved", v1=title, v2=path))
                 open_in_file_manager(path)
                 return
             self.status_lbl.configure(text=f"✅ {os.path.basename(result)}")
-            self.log(f"✅ دانلود شد → {result}")
+            self.log(t("ui.log.downloaded", v1=result))
             open_in_file_manager(result)
 
         self.start_worker(work, done)
@@ -1242,20 +1273,20 @@ class DownloadTab(Tab):
 # =============================== Translate ==================================
 
 class TranslateTab(Tab):
-    _START = "🚀 ترجمه کن"
+    _START_KEY = "ui.btn.start_translate"
 
     def __init__(self, master, app):
         super().__init__(master, app)
         self._build_control_card()
-        self._progress_block("آماده‌ی ترجمه ✅")
-        self._start_text = self._START
+        self._progress_block(t("ui.status.translate_ready"))
+        self._start_text = t(self._START_KEY)
 
     def _build_control_card(self):
         card = ctk.CTkFrame(self, corner_radius=12)
         card.grid(row=0, column=0, sticky="new", padx=2, pady=(0, 8))
         card.columnconfigure(0, weight=1)
 
-        ctk.CTkLabel(card, text="🌍 ترجمه‌ی فایل SRT با Gemini", font=F(15, "bold"),
+        ctk.CTkLabel(card, text=t("ui.title.translate_tab"), font=F(15, "bold"),
                      anchor="w").grid(row=0, column=0, columnspan=3, sticky="ew",
                                       padx=12, pady=(10, 6))
 
@@ -1265,9 +1296,9 @@ class TranslateTab(Tab):
         fr.columnconfigure(0, weight=1)
         self.srt_entry = make_entry(fr, textvariable=self.srt_var,
                                     on_open=self._pick,
-                                    placeholder_text="مسیر فایل .srt ورودی…")
+                                    placeholder_text=t("ui.placeholder.srt_path"))
         self.srt_entry.grid(row=0, column=0, sticky="ew")
-        ctk.CTkButton(fr, text="انتخاب فایل…", width=110, font=F(12),
+        ctk.CTkButton(fr, text=t("ui.menu.choose_file"), width=110, font=F(12),
                       command=self._pick).grid(row=0, column=1, padx=(8, 0))
         self.srt_entry.bind("<Return>", lambda _e: self.trigger_start())
 
@@ -1275,25 +1306,25 @@ class TranslateTab(Tab):
         row.grid(row=2, column=0, columnspan=3, sticky="ew", padx=12)
         for i in range(2):
             row.columnconfigure(i, weight=1, uniform="topt")
-        ctk.CTkLabel(row, text="به زبان", anchor="w", font=F(12)).grid(
+        ctk.CTkLabel(row, text=t("ui.label.translate_to"), anchor="w", font=F(12)).grid(
             row=0, column=0, sticky="ew")
         self.lang_menu = ctk.CTkOptionMenu(
-            row, values=[lbl for _, lbl, _ in engine.TRANSLATE_LANGUAGES],
+            row, values=label_list(engine.TRANSLATE_LANGUAGES),
             font=F(12), dropdown_font=F(12))
-        self.lang_menu.set(engine.TRANSLATE_LANGUAGES[0][1])
+        self.lang_menu.set(t(engine.TRANSLATE_LANGUAGES[0][1]))
         self.lang_menu.grid(row=1, column=0, sticky="ew", padx=(0, 6))
-        ctk.CTkLabel(row, text="سبک ترجمه", anchor="w", font=F(12)).grid(
+        ctk.CTkLabel(row, text=t("ui.label.translate_style"), anchor="w", font=F(12)).grid(
             row=0, column=1, sticky="ew")
         self.style_menu = ctk.CTkOptionMenu(
-            row, values=[lbl for _, lbl in engine.TRANSLATE_STYLES],
+            row, values=label_list(engine.TRANSLATE_STYLES),
             font=F(12), dropdown_font=F(12))
-        self.style_menu.set(engine.TRANSLATE_STYLES[0][1])
+        self.style_menu.set(t(engine.TRANSLATE_STYLES[0][1]))
         self.style_menu.grid(row=1, column=1, sticky="ew", padx=(6, 0))
 
         out = ctk.CTkFrame(card, fg_color="transparent")
         out.grid(row=3, column=0, columnspan=3, sticky="ew", padx=12, pady=(8, 0))
         out.columnconfigure(1, weight=1)
-        ctk.CTkLabel(out, text="پوشه‌ی خروجی", font=F(12)).grid(
+        ctk.CTkLabel(out, text=t("ui.label.output_dir"), font=F(12)).grid(
             row=0, column=0, sticky="w", padx=(0, 6))
         self.out_var = tk.StringVar(value=self.app.settings["out_dir"])
         make_entry(out, textvariable=self.out_var).grid(row=0, column=1, sticky="ew")
@@ -1306,11 +1337,11 @@ class TranslateTab(Tab):
 
         act = ctk.CTkFrame(card, fg_color="transparent")
         act.grid(row=4, column=0, columnspan=3, sticky="ew", padx=12, pady=(10, 12))
-        self.start_btn = ctk.CTkButton(act, text=self._START, height=38, width=130,
+        self.start_btn = ctk.CTkButton(act, text=self._start_text, height=38, width=130,
                                        font=F(13, "bold"), fg_color=ACCENT,
                                        hover_color=ACCENT_HOVER, command=self._start)
         self.start_btn.pack(side="right")
-        self.cancel_btn = ctk.CTkButton(act, text="⛔ لغو", height=38, width=90,
+        self.cancel_btn = ctk.CTkButton(act, text=t("ui.btn.cancel"), height=38, width=90,
                                         font=F(12), fg_color=DANGER,
                                         hover_color=DANGER_HOVER,
                                         command=self.cancel, state="disabled")
@@ -1318,7 +1349,7 @@ class TranslateTab(Tab):
 
     def _pick(self):
         path = fd.askopenfilename(parent=self, filetypes=[("SRT", "*.srt"),
-                                                          ("همه", "*.*")])
+                                                          (t("ui.dialog.all"), "*.*")])
         if path:
             self.srt_var.set(path)
             self.app.settings["last_srt"] = path
@@ -1330,42 +1361,42 @@ class TranslateTab(Tab):
             with open(path, encoding="utf-8", errors="ignore") as f:
                 text = f.read()
             count = text.count("-->")
-            self.log(f"📄 {os.path.basename(path)} — {count} خط زیرنویس")
+            self.log(t("ui.log.srt_loaded", v1=os.path.basename(path), v2=count))
         except Exception as exc:
-            self.log(f"⚠️ خواندن فایل ناموفق: {exc}")
+            self.log(t("ui.err.srt_read_failed", v1=exc))
 
     def _start(self):
         srt_path = self.srt_var.get().strip()
         if not srt_path or not os.path.exists(srt_path):
-            mb.showerror(APP_NAME, "فایل SRT پیدا نشد.", parent=self)
+            mb.showerror(APP_NAME, t("ui.err.srt_missing"), parent=self)
             return
         out_dir = self.out_var.get().strip() or self.app.settings["out_dir"]
         try:
             os.makedirs(out_dir, exist_ok=True)
         except Exception as exc:
-            mb.showerror(APP_NAME, f"ساخت پوشه‌ی خروجی ناموفق بود:\n{exc}", parent=self)
+            mb.showerror(APP_NAME, t("ui.err.out_dir_create_failed", v1=exc), parent=self)
             return
         self.app.settings["out_dir"] = out_dir
         self.app.settings["last_srt"] = srt_path
 
         lang_label = self.lang_menu.get()
         lang_code = next(c for c, lbl, _ in engine.TRANSLATE_LANGUAGES
-                         if lbl == lang_label)
+                         if t(lbl) == lang_label)
         human = next(h for _, lbl, h in engine.TRANSLATE_LANGUAGES
-                     if lbl == lang_label)
-        style = {lbl: code for code, lbl in engine.TRANSLATE_STYLES}[
+                     if t(lbl) == lang_label)
+        style = label_map(engine.TRANSLATE_STYLES)[
             self.style_menu.get()]
         keys = engine.gemini_keys(self.app.settings.get("gemini_key"))
         if not keys:
-            mb.showerror(APP_NAME, "اول کلید Gemini را در تب «تنظیمات» بگذار.",
+            mb.showerror(APP_NAME, t("ui.err.need_gemini_key_settings"),
                          parent=self)
             return
 
         save_settings(self.app.settings)
         job = self.make_job()
         self.set_running(True)
-        self.reset_progress("⏳ شروع ترجمه…")
-        self.log(f"▶️ ترجمه به {human} ({style}) — {len(keys)} کلید Gemini")
+        self.reset_progress(t("ui.status.translate_starting"))
+        self.log(t("ui.log.translate_started", v1=human, v2=style, v3=len(keys)))
 
         def work():
             return engine.translate_srt_file(
@@ -1375,15 +1406,15 @@ class TranslateTab(Tab):
         def done(result, err):
             self.set_running(False)
             if err:
-                self.status_lbl.configure(text="❌ ترجمه ناموفق بود")
+                self.status_lbl.configure(text=t("ui.status.translate_failed"))
                 self.log(f"❌ {err}")
                 mb.showerror(APP_NAME, str(err), parent=self)
                 return
             self.overall_bar.set(1)
             self.percent_lbl.configure(text="100.0%")
             self.status_lbl.configure(text=f"✅ {os.path.basename(result)}")
-            self.log(f"✅ ترجمه شد → {result}")
-            mb.showinfo(APP_NAME, f"ترجمه آماده است:\n{result}", parent=self)
+            self.log(t("ui.log.translated", v1=result))
+            mb.showinfo(APP_NAME, t("ui.dialog.translate_done", v1=result), parent=self)
 
         self.start_worker(work, done)
 
@@ -1407,48 +1438,48 @@ class SettingsTab(Tab):
         body.columnconfigure(1, weight=1)
         self.body = body
 
-        ctk.CTkLabel(body, text="⚙️ تنظیمات", font=F(15, "bold"), anchor="w").grid(
+        ctk.CTkLabel(body, text=t("ui.tab.settings"), font=F(15, "bold"), anchor="w").grid(
             row=0, column=0, columnspan=3, sticky="ew", padx=12, pady=(10, 8))
 
         # keys
-        ctk.CTkLabel(body, text="کلید Groq API", font=F(12)).grid(
+        ctk.CTkLabel(body, text=t("ui.label.groq_key"), font=F(12)).grid(
             row=1, column=0, sticky="w", padx=12, pady=3)
         self.groq_var = tk.StringVar(value="•" * 8 if app.settings.get("groq_key") else "")
         self.groq_entry = make_entry(
             body, textvariable=self.groq_var, show="•",
-            placeholder_text="gsk_…  (Whisper رایگان Groq)")
+            placeholder_text=t("ui.placeholder.groq_key"))
         self.groq_entry.grid(row=1, column=1, sticky="ew", padx=6, pady=3)
-        ctk.CTkButton(body, text="تست", width=52, height=26, font=F(11),
+        ctk.CTkButton(body, text=t("ui.btn.test"), width=52, height=26, font=F(11),
                       command=lambda: self._test_key("groq", self.groq_var.get())
                       ).grid(row=1, column=2, padx=(0, 12), pady=3)
 
-        ctk.CTkLabel(body, text="کلید Gemini API", font=F(12)).grid(
+        ctk.CTkLabel(body, text=t("ui.label.gemini_key"), font=F(12)).grid(
             row=2, column=0, sticky="w", padx=12, pady=3)
         self.gem_var = tk.StringVar(value="•" * 8 if app.settings.get("gemini_key") else "")
         self.gem_entry = make_entry(
             body, textvariable=self.gem_var, show="•",
-            placeholder_text="AIza…  (ترجمه و حالت عمیق)")
+            placeholder_text=t("ui.placeholder.gemini_key"))
         self.gem_entry.grid(row=2, column=1, sticky="ew", padx=6, pady=3)
-        ctk.CTkButton(body, text="تست", width=52, height=26, font=F(11),
+        ctk.CTkButton(body, text=t("ui.btn.test"), width=52, height=26, font=F(11),
                       command=lambda: self._test_key("gemini", self.gem_var.get())
                       ).grid(row=2, column=2, padx=(0, 12), pady=3)
 
         self.save_keys_var = tk.BooleanVar(value=app.settings.get("save_keys", False))
-        ctk.CTkCheckBox(body, text="کلید تازه را در استخر محلی (keys/) هم ذخیره کن",
+        ctk.CTkCheckBox(body, text=t("ui.check.save_key_pool"),
                         variable=self.save_keys_var, font=F(12)).grid(
             row=3, column=0, columnspan=3, sticky="w", padx=12, pady=(6, 2))
 
-        ctk.CTkLabel(body, text="پوشه‌ی پیش‌فرض خروجی", font=F(12)).grid(
+        ctk.CTkLabel(body, text=t("ui.label.default_out_dir"), font=F(12)).grid(
             row=4, column=0, sticky="w", padx=12, pady=3)
         self.out_var = tk.StringVar(value=app.settings["out_dir"])
         make_entry(body, textvariable=self.out_var).grid(
             row=4, column=1, sticky="ew", padx=6, pady=3)
         ctk.CTkButton(body, text="…", width=34, font=F(12),
                       command=lambda: self._pick_out_dir(self.out_var,
-                                                         "پوشه‌ی خروجی")
+                                                         t("ui.label.output_dir"))
                       ).grid(row=4, column=2, padx=(0, 12), pady=3)
 
-        ctk.CTkLabel(body, text="🍪 فایل کوکی (اختیاری)", font=F(12)).grid(
+        ctk.CTkLabel(body, text=t("ui.label.cookies_file"), font=F(12)).grid(
             row=5, column=0, sticky="w", padx=12, pady=3)
         self.cookie_var = tk.StringVar(value=app.settings.get("cookies", ""))
         make_entry(body, textvariable=self.cookie_var,
@@ -1458,14 +1489,14 @@ class SettingsTab(Tab):
                       command=self._pick_cookie).grid(
             row=5, column=2, padx=(0, 12), pady=3)
 
-        ctk.CTkLabel(body, text="پروکسی یوتیوب (اختیاری)", font=F(12)).grid(
+        ctk.CTkLabel(body, text=t("ui.label.youtube_proxy"), font=F(12)).grid(
             row=6, column=0, sticky="w", padx=12, pady=3)
         self.proxy_var = tk.StringVar(value=app.settings.get("proxy", ""))
         make_entry(body, textvariable=self.proxy_var,
-                   placeholder_text="http://user:pass@host:port  — خالی = بدون پروکسی").grid(
+                   placeholder_text=t("ui.placeholder.proxy")).grid(
             row=6, column=1, columnspan=2, sticky="ew", padx=(6, 12), pady=3)
 
-        ctk.CTkButton(body, text="💾 ذخیره‌ی تنظیمات", height=38, font=F(13, "bold"),
+        ctk.CTkButton(body, text=t("ui.btn.save_settings"), height=38, font=F(13, "bold"),
                       fg_color=ACCENT, hover_color=ACCENT_HOVER,
                       command=self._save).grid(
             row=7, column=0, columnspan=3, sticky="ew", padx=12, pady=(12, 8))
@@ -1474,10 +1505,10 @@ class SettingsTab(Tab):
         env = ctk.CTkFrame(body, corner_radius=10)
         env.grid(row=8, column=0, columnspan=3, sticky="ew", padx=12, pady=(4, 8))
         env.columnconfigure(0, weight=1)
-        self.env_lbl = ctk.CTkLabel(env, text="در حال بررسی محیط…", anchor="w",
+        self.env_lbl = ctk.CTkLabel(env, text=t("ui.status.checking_env"), anchor="w",
                                     justify="right", font=F(11), text_color=MUTED)
         self.env_lbl.grid(row=0, column=0, sticky="ew", padx=10, pady=(8, 2))
-        ctk.CTkButton(env, text="🔄 بررسی مجدد", width=110, height=26, font=F(11),
+        ctk.CTkButton(env, text=t("ui.btn.recheck"), width=110, height=26, font=F(11),
                       command=self.refresh_env).grid(row=1, column=0, sticky="w",
                                                      padx=10, pady=(0, 8))
 
@@ -1485,17 +1516,17 @@ class SettingsTab(Tab):
         guide = ctk.CTkFrame(body, corner_radius=10)
         guide.grid(row=9, column=0, columnspan=3, sticky="ew", padx=12, pady=(0, 8))
         guide.columnconfigure(0, weight=1)
-        ctk.CTkLabel(guide, text="📖 پیوندهای مفید", font=F(13, "bold"),
+        ctk.CTkLabel(guide, text=t("ui.label.useful_links"), font=F(13, "bold"),
                      anchor="w").grid(row=0, column=0, sticky="ew", padx=10,
                                       pady=(8, 2))
         for i, (text, url) in enumerate([
-            ("دریافت کلید رایگان Groq", "https://console.groq.com/keys"),
-            ("دریافت کلید Gemini (Google AI Studio)",
+            (t("ui.link.groq_key"), "https://console.groq.com/keys"),
+            (t("ui.link.gemini_key"),
              "https://aistudio.google.com/apikey"),
-            ("افزونه‌ی Get cookies.txt LOCALLY",
+            (t("ui.link.cookies_extension"),
              "https://chromewebstore.google.com/detail/get-cookiestxt-locally/"
              "cclelndahbckbenkjhflpdbgdldlbecc"),
-            ("مخزن CustomTkinter",
+            (t("ui.link.customtkinter"),
              "https://github.com/TomSchimansky/CustomTkinter"),
         ]):
             ctk.CTkButton(guide, text=text, height=28, anchor="w", font=F(11),
@@ -1524,21 +1555,21 @@ class SettingsTab(Tab):
         try:
             status = engine.environment_status()
         except Exception as exc:
-            self.env_lbl.configure(text=f"بررسی محیط ناموفق: {exc}")
+            self.env_lbl.configure(text=t("ui.err.env_check_failed", v1=exc))
             return
-        ffmpeg = "✅ ffmpeg" if status["ffmpeg"] else "❌ ffmpeg پیدا نشد"
-        ytdlp = "✅ yt-dlp" if status["ytdlp"] else "❌ yt-dlp نصب نیست"
+        ffmpeg = "✅ ffmpeg" if status["ffmpeg"] else t("ui.status.ffmpeg_missing")
+        ytdlp = "✅ yt-dlp" if status["ytdlp"] else t("ui.status.ytdlp_missing")
         text = (f"{ffmpeg}   ·   {ytdlp}   ·   "
                 f"🔑 Groq: {status['keys_groq']}   ·   "
                 f"🔑 Gemini: {status['keys_gemini']}")
         self.env_lbl.configure(text=text)
         if not status["ffmpeg"]:
-            self.log("⚠️ ffmpeg روی PATH نیست؛ کارهای صوتی/دانلودی کار نمی‌کنند.")
+            self.log(t("ui.warn.ffmpeg_not_on_path"))
 
     def _pick_cookie(self):
         path = fd.askopenfilename(parent=self, initialdir=HERE,
                                   filetypes=[("cookies.txt", "*.txt"),
-                                             ("همه", "*.*")])
+                                             (t("ui.dialog.all"), "*.*")])
         if path:
             self.cookie_var.set(path)
 
@@ -1558,17 +1589,17 @@ class SettingsTab(Tab):
                     continue
                 try:
                     added, total = engine.save_key(provider, key)
-                    self.log(f"🔑 استخر {provider}: {total} کلید"
-                             + (" (کلید جدید اضافه شد)" if added else ""))
+                    self.log(t("ui.log.key_pool", v1=provider, v2=total)
+                             + (t("ui.log.key_added") if added else ""))
                 except Exception as exc:
-                    self.log(f"⚠️ ذخیره‌ی کلید {provider} ناموفق: {exc}")
+                    self.log(t("ui.err.key_save_failed", v1=provider, v2=exc))
         out_dir = self.out_var.get().strip()
         if out_dir:
             s["out_dir"] = out_dir
             try:
                 os.makedirs(out_dir, exist_ok=True)
             except Exception as exc:
-                mb.showerror(APP_NAME, f"ساخت پوشه‌ی خروجی ناموفق بود:\n{exc}",
+                mb.showerror(APP_NAME, t("ui.err.out_dir_create_failed", v1=exc),
                              parent=self)
         s["cookies"] = self.cookie_var.get().strip()
         s["proxy"] = self.proxy_var.get().strip()
@@ -1576,24 +1607,24 @@ class SettingsTab(Tab):
         save_settings(s)
         self.app.refresh_out_dirs()
         self.refresh_env()
-        self.log("✅ تنظیمات ذخیره شد.")
-        mb.showinfo(APP_NAME, "تنظیمات ذخیره شد ✅", parent=self)
+        self.log(t("ui.log.settings_saved"))
+        mb.showinfo(APP_NAME, t("ui.status.settings_saved"), parent=self)
 
     def _test_key(self, provider, key):
         key = (key or "").strip()
         if key.startswith("•"):
             key = self.app.settings.get(f"{provider}_key", "")
         if not key:
-            mb.showwarning(APP_NAME, "اول کلید را وارد کن.", parent=self)
+            mb.showwarning(APP_NAME, t("ui.err.need_key_first"), parent=self)
             return
-        self.log(f"🔍 تست کلید {provider}…")
+        self.log(t("ui.log.testing_key", v1=provider))
 
         def work():
             return engine.test_api_key(provider, key)
 
         def done(result, err):
             if err:
-                self.log(f"❌ تست ناموفق: {err}")
+                self.log(t("ui.err.test_failed", v1=err))
                 return
             ok, message = result
             self.log(message)
@@ -1614,10 +1645,12 @@ class SettingsTab(Tab):
 class App(ctk.CTk):
     def __init__(self):
         super().__init__()
-        # Pick a font that can actually render Persian *before* building widgets.
+        # Settings first: the saved (or default English) language decides which
+        # font families are acceptable and what every widget says.
         global UI_FAMILY
-        UI_FAMILY = choose_font_family(self)
         self.settings = load_settings()
+        i18n.set_language(self.settings.get("language", i18n.DEFAULT_LANGUAGE))
+        UI_FAMILY = choose_font_family(self)
         self.title(f"{APP_NAME} v{VERSION}")
         self.minsize(MIN_WIDTH, MIN_HEIGHT)
         self._restore_geometry()
@@ -1627,19 +1660,59 @@ class App(ctk.CTk):
         self.apply_proxy(self.settings.get("proxy", ""))
         self._closing = False
         self._after_ids = []
+        self.sidebar = None
+        self.content = None
 
         self.grid_columnconfigure(1, weight=1)
         self.grid_rowconfigure(0, weight=1)
+        self._build_ui()
+        self._schedule(80, self._restore_geometry)
+        self._schedule(300, self._startup_checks)
+
+    def _build_ui(self):
         self._build_sidebar()
         self._build_content()
         self._bind_shortcuts()
-        self.show("transcribe")
+        current = getattr(self, "current", None)
+        self.show(current if current in self.tabs else TAB_ORDER[0])
         self._apply_scale(float(self.settings.get("scale", 1.0)))
-        # CustomTkinter re-applies its own size when the widget scaling changes,
-        # so the requested geometry has to be asserted again once scaling has
-        # settled; otherwise the window opens at the minimum size.
-        self._schedule(80, self._restore_geometry)
-        self._schedule(300, self._startup_checks)
+
+    def set_language(self, code):
+        """Switch the UI language and rebuild every widget in place."""
+        code = i18n.set_language(code)
+        if code == self.settings.get("language"):
+            return code
+        for tab in getattr(self, "tabs", {}).values():
+            if getattr(tab, "_job", None) is not None and tab._job.running:
+                mb.showwarning(APP_NAME, t("ui.err.language_job_running"),
+                               parent=self)
+                return self.settings.get("language", i18n.DEFAULT_LANGUAGE)
+        self.settings["language"] = code
+        save_settings(dict(self.settings))
+        self.rebuild_ui()
+        return code
+
+    def rebuild_ui(self):
+        """Recreate sidebar + tabs (used when the language changes)."""
+        global UI_FAMILY
+        current = getattr(self, "current", TAB_ORDER[0])
+        for tab in getattr(self, "tabs", {}).values():
+            try:
+                tab.pump.stop()
+                if getattr(tab, "_job", None) is not None:
+                    tab._job.cancel()
+            except Exception:
+                pass
+        self.tabs = {}
+        for widget in (self.sidebar, self.content):
+            try:
+                widget.destroy()
+            except Exception:
+                pass
+        _FONT_REGISTRY.clear()
+        UI_FAMILY = choose_font_family(self)
+        apply_tk_default_fonts(self)
+        self._build_ui()
 
     def _restore_geometry(self):
         """Apply the saved size, clamped to the screen and to our minimum."""
@@ -1717,16 +1790,16 @@ class App(ctk.CTk):
         ctk.CTkLabel(self.sidebar, text=f"🤖 {APP_NAME}", font=F(20, "bold"),
                      anchor="w").grid(row=0, column=0, padx=16, pady=(18, 0),
                                       sticky="ew")
-        ctk.CTkLabel(self.sidebar, text="نسخه‌ی دسکتاپ موتور Arion",
+        ctk.CTkLabel(self.sidebar, text=t("ui.app.subtitle"),
                      text_color="gray50", font=F(11), anchor="w").grid(
             row=1, column=0, padx=16, sticky="ew")
 
         self.nav_btns = {}
         for i, (name, label) in enumerate([
-                ("transcribe", "🎬  ساخت زیرنویس"),
-                ("download", "📺  دانلود یوتیوب"),
-                ("translate", "🌍  ترجمه‌ی SRT"),
-                ("settings", "⚙️  تنظیمات")]):
+                ("transcribe", t("ui.nav.transcribe")),
+                ("download", t("ui.nav.download")),
+                ("translate", t("ui.nav.translate")),
+                ("settings", t("ui.nav.settings"))]):
             btn = ctk.CTkButton(self.sidebar, text=label, height=42, anchor="w",
                                 corner_radius=8, font=F(13),
                                 fg_color="transparent",
@@ -1739,14 +1812,14 @@ class App(ctk.CTk):
         ui.grid(row=99, column=0, padx=12, pady=10, sticky="sew")
         ui.columnconfigure(0, weight=1)
 
-        ctk.CTkLabel(ui, text="🔍 اندازه‌ی عناصر رابط", font=F(11),
+        ctk.CTkLabel(ui, text=t("ui.label.ui_scale"), font=F(11),
                      anchor="w").grid(row=0, column=0, sticky="ew")
         self.scale_val = tk.DoubleVar(value=float(self.settings.get("scale", 1.0)))
         ctk.CTkSlider(ui, from_=0.75, to=1.5, number_of_steps=15,
                       variable=self.scale_val, command=self._on_scale).grid(
             row=1, column=0, sticky="ew", pady=(2, 6))
 
-        ctk.CTkLabel(ui, text="🎨 ظاهر", font=F(11), anchor="w").grid(
+        ctk.CTkLabel(ui, text=t("ui.label.appearance"), font=F(11), anchor="w").grid(
             row=2, column=0, sticky="ew")
         self.theme_menu = ctk.CTkOptionMenu(ui, values=["system", "dark", "light"],
                                             font=F(11), dropdown_font=F(11),
@@ -1754,14 +1827,28 @@ class App(ctk.CTk):
         self.theme_menu.set(self.settings.get("theme", "system"))
         self.theme_menu.grid(row=3, column=0, sticky="ew", pady=(2, 6))
 
-        ctk.CTkButton(ui, text="⌨️ میان‌برهای کیبورد", height=28, font=F(11),
+        ctk.CTkLabel(ui, text=t("ui.label.language"), font=F(11), anchor="w").grid(
+            row=4, column=0, sticky="ew")
+        self.lang_ui_menu = ctk.CTkOptionMenu(
+            ui, values=[i18n.language_label(code) for code in i18n.language_codes()],
+            font=F(11), dropdown_font=F(11), command=self._on_language)
+        self.lang_ui_menu.set(i18n.language_label(i18n.get_language()))
+        self.lang_ui_menu.grid(row=5, column=0, sticky="ew", pady=(2, 6))
+
+        ctk.CTkButton(ui, text=t("ui.btn.shortcuts"), height=28, font=F(11),
                       fg_color="transparent", hover_color=("#ddd", "#333"),
                       border_width=1, command=self.show_shortcuts).grid(
-            row=4, column=0, sticky="ew", pady=(0, 4))
+            row=6, column=0, sticky="ew", pady=(0, 4))
         ctk.CTkLabel(
-            ui, text="میان‌برها با صفحه‌کلید فارسی/عربی/سیریلیک هم کار می‌کنند.",
+            ui, text=t("ui.hint.shortcuts_layout"),
             font=F(10), justify="right", text_color="gray50",
-            wraplength=190).grid(row=5, column=0, sticky="ew")
+            wraplength=190).grid(row=7, column=0, sticky="ew")
+
+    def _on_language(self, label):
+        for code in i18n.language_codes():
+            if i18n.language_label(code) == label:
+                self.set_language(code)
+                return
 
     def _build_content(self):
         self.content = ctk.CTkFrame(self, fg_color="transparent")
@@ -1993,14 +2080,14 @@ class App(ctk.CTk):
     def show_proxy_dialog(self):
         proxy = mb.askstring(
             APP_NAME,
-            "پروکسی یوتیوب:\n(http://user:pass@host:port — خالی = بدون پروکسی)",
+            t("ui.dialog.proxy"),
             initialvalue=self.settings.get("proxy", ""), parent=self)
         if proxy is not None:
             proxy = proxy.strip()
             self.settings["proxy"] = proxy
             self.apply_proxy(proxy)
             save_settings(self.settings)
-            mb.showinfo(APP_NAME, "پروکسی اعمال شد." if proxy else "پروکسی برداشته شد.",
+            mb.showinfo(APP_NAME, t("ui.log.proxy_applied") if proxy else t("ui.log.proxy_cleared"),
                         parent=self)
 
     def refresh_out_dirs(self):
@@ -2014,32 +2101,17 @@ class App(ctk.CTk):
 
     def show_shortcuts(self):
         win = ctk.CTkToplevel(self)
-        win.title("میان‌برهای کیبورد")
+        win.title(t("ui.title.shortcuts"))
         win.geometry("560x460")
         win.transient(self)
         text = (
-            "میان‌برها با هر چیدمان صفحه‌کلید (فارسی، عربی، سیریلیک…) کار می‌کنند،\n"
-            "چون از کد فیزیکی کلید خوانده می‌شوند نه از حرف.\n\n"
-            "Ctrl+O      انتخاب فایل (در هر تب)\n"
-            "Ctrl+Enter  شروع کار فعلی\n"
-            "F5          شروع کار فعلی\n"
-            "Esc         لغو کار در حال اجرا\n"
-            "Ctrl+1..4   رفتن به تب ۱ تا ۴\n"
-            "Ctrl+Tab    تب بعدی\n"
-            "Ctrl+S      ذخیره (در تنظیمات)\n"
-            "Ctrl+L      پاک کردن لاگ\n"
-            "Ctrl+C/V/X  کپی / چسباندن / برش در هر فیلد متنی\n"
-            "Ctrl+A      انتخاب همه\n"
-            "Ctrl+Z / Y  برگشت / تکرار در جعبه‌های متن\n"
-            "Shift+Insert / Ctrl+Insert  چسباندن / کپی\n"
-            "F1          همین راهنما\n\n"
-            "روی هر فیلد متنی راست‌کلیک هم منوی برش/کپی/چسباندن دارد."
+            t("ui.help.shortcuts")
         )
         box = make_textbox(win, wrap="word")
         box.pack(fill="both", expand=True, padx=14, pady=(14, 8))
         box.insert("1.0", text)
         box.configure(state="disabled")
-        ctk.CTkButton(win, text="بستن", width=100,
+        ctk.CTkButton(win, text=t("ui.btn.close"), width=100,
                       command=win.destroy).pack(pady=(0, 12))
         try:
             win.grab_set()
@@ -2053,21 +2125,14 @@ class App(ctk.CTk):
             return
         tab = self.tabs.get("transcribe")
         if not status["ffmpeg"]:
-            tab.log("⚠️ ffmpeg/ffprobe روی PATH نیست — کارهای صوتی کار نمی‌کنند. "
-                    "نصب: winget install Gyan.FFmpeg")
+            tab.log(t("ui.warn.ffmpeg_missing_install"))
             mb.showwarning(
-                "ffmpeg پیدا نشد",
-                "برای پردازش صدا/ویدیو به ffmpeg و ffprobe نیاز است.\n\n"
-                "ویندوز:  winget install Gyan.FFmpeg\n"
-                "لینوکس:  sudo apt install ffmpeg\n"
-                "مک:      brew install ffmpeg\n\n"
-                "برنامه باز می‌شود ولی ساخت زیرنویس و دانلود کار نمی‌کند.",
+                t("ui.err.ffmpeg_missing"),
+                t("ui.dialog.ffmpeg_help"),
                 parent=self)
         if not status["ytdlp"]:
-            tab.log("⚠️ yt-dlp در دسترس نیست — دانلود یوتیوب کار نمی‌کند "
-                    "(pip install -r requirements.txt).")
-        tab.log(f"✅ محیط آماده است · Groq: {status['keys_groq']} کلید · "
-                f"Gemini: {status['keys_gemini']} کلید")
+            tab.log(t("ui.warn.ytdlp_missing"))
+        tab.log(t("ui.log.env_ready", v1=status['keys_groq'], v2=status['keys_gemini']))
 
     def _current_geometry(self):
         """Window geometry worth persisting, or None.
@@ -2096,6 +2161,7 @@ class App(ctk.CTk):
                 self.settings["geometry"] = geometry
             self.settings["scale"] = float(self.scale_val.get())
             self.settings["theme"] = self.theme_menu.get()
+            self.settings["language"] = i18n.get_language()
             save_settings(dict(self.settings))
         except Exception:
             pass

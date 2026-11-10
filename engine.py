@@ -23,73 +23,87 @@ import threading
 import time
 
 from core import config, downloader, keypool, srt_utils, transcribe, translate
+from i18n import t
 
 # --- Choice tables (mirrors of the bot's menus) ------------------------------
+# Labels are i18n keys: resolve each one with ``t(label)`` before displaying it.
 
 LANGUAGES = [
-    ("auto", "🔎 تشخیص خودکار / auto"),
-    ("fa", "🇮🇷 فارسی / Persian"),
-    ("en", "🇬🇧 انگلیسی / English"),
-    ("de", "🇩🇪 آلمانی / German"),
-    ("ar", "🇸🇦 عربی / Arabic"),
-    ("tr", "🇹🇷 ترکی / Turkish"),
-    ("ru", "🇷🇺 روسی / Russian"),
+    ("auto", "engine.lang.auto"),
+    ("fa", "engine.lang.fa"),
+    ("en", "engine.lang.en"),
+    ("de", "engine.lang.de"),
+    ("ar", "engine.lang.ar"),
+    ("tr", "engine.lang.tr"),
+    ("ru", "engine.lang.ru"),
 ]
 
 SUBTITLE_STYLES = [
-    (srt_utils.STYLE_SENTENCE, "📝 جمله‌ای (استاندارد / standard)"),
-    (srt_utils.STYLE_SHORT, "✂️ خطوط کوتاه (برای ترجمه / short)"),
-    (srt_utils.STYLE_WORD, "🔤 کلمه‌به‌کلمه (word-level)"),
+    (srt_utils.STYLE_SENTENCE, "engine.style.sentence"),
+    (srt_utils.STYLE_SHORT, "engine.style.short"),
+    (srt_utils.STYLE_WORD, "engine.style.word"),
 ]
 
 PROVIDERS = [
-    ("groq", "⚡ Groq (Whisper)"),
-    ("gemini", "✨ Gemini (deep listen)"),
+    ("groq", "engine.provider.groq"),
+    ("gemini", "engine.provider.gemini"),
 ]
 
 DL_AUDIO_QUALITIES = [
-    ("audio", "🎧 MP3 (64k mono — سبک)"),
-    ("m4a", "🎵 M4A (بدون تبدیل)"),
-    ("opus", "🎵 Opus"),
-    ("flac", "🎼 FLAC (بدون افت)"),
+    ("audio", "engine.quality.audio.audio"),
+    ("m4a", "engine.quality.audio.m4a"),
+    ("opus", "engine.quality.audio.opus"),
+    ("flac", "engine.quality.audio.flac"),
 ]
 
 DL_VIDEO_QUALITIES = [
-    ("best", "⭐ بهترین کیفیت موجود"),
-    ("2160", "4K (2160p)"),
-    ("1440", "2K (1440p)"),
-    ("1080", "Full HD (1080p)"),
-    ("720", "HD (720p)"),
-    ("480", "480p"),
-    ("360", "360p"),
-    ("240", "240p"),
-    ("144", "144p"),
+    ("best", "engine.quality.video.best"),
+    ("2160", "engine.quality.video.2160"),
+    ("1440", "engine.quality.video.1440"),
+    ("1080", "engine.quality.video.1080"),
+    ("720", "engine.quality.video.720"),
+    ("480", "engine.quality.video.480"),
+    ("360", "engine.quality.video.360"),
+    ("240", "engine.quality.video.240"),
+    ("144", "engine.quality.video.144"),
 ]
 
 # Short labels used when showing size estimates.
 DL_VIDEO_LABELS = {
-    "best": "بهترین", "2160": "4K", "1440": "2K", "1080": "1080p",
-    "720": "720p", "480": "480p", "360": "360p", "240": "240p", "144": "144p",
+    "best": "engine.quality.video_short.best",
+    "2160": "engine.quality.video_short.2160",
+    "1440": "engine.quality.video_short.1440",
+    "1080": "engine.quality.video_short.1080",
+    "720": "engine.quality.video_short.720",
+    "480": "engine.quality.video_short.480",
+    "360": "engine.quality.video_short.360",
+    "240": "engine.quality.video_short.240",
+    "144": "engine.quality.video_short.144",
 }
-DL_AUDIO_LABELS = {"mp3": "MP3", "m4a": "M4A", "opus": "Opus", "flac": "FLAC",
-                   "audio": "MP3"}
+DL_AUDIO_LABELS = {
+    "mp3": "engine.quality.audio_short.mp3",
+    "m4a": "engine.quality.audio_short.m4a",
+    "opus": "engine.quality.audio_short.opus",
+    "flac": "engine.quality.audio_short.flac",
+    "audio": "engine.quality.audio_short.audio",
+}
 
 TRANSLATE_LANGUAGES = [
-    ("fa", "🇮🇷 فارسی / Persian", "Persian"),
-    ("en", "🇬🇧 انگلیسی / English", "English"),
-    ("ar", "🇸🇦 عربی / Arabic", "Arabic"),
-    ("tr", "🇹🇷 ترکی / Turkish", "Turkish"),
-    ("de", "🇩🇪 آلمانی / German", "German"),
-    ("fr", "🇫🇷 فرانسوی / French", "French"),
-    ("es", "🇪🇸 اسپانیایی / Spanish", "Spanish"),
-    ("ru", "🇷🇺 روسی / Russian", "Russian"),
-    ("it", "🇮🇹 ایتالیایی / Italian", "Italian"),
+    ("fa", "engine.lang.fa", "Persian"),
+    ("en", "engine.lang.en", "English"),
+    ("ar", "engine.lang.ar", "Arabic"),
+    ("tr", "engine.lang.tr", "Turkish"),
+    ("de", "engine.lang.de", "German"),
+    ("fr", "engine.lang.fr", "French"),
+    ("es", "engine.lang.es", "Spanish"),
+    ("ru", "engine.lang.ru", "Russian"),
+    ("it", "engine.lang.it", "Italian"),
 ]
 
 TRANSLATE_STYLES = [
-    ("casual", "😎 خودمانی و محاوره‌ای / casual"),
-    ("formal", "🎩 رسمی / formal"),
-    ("educational", "📚 آموزشی / فنی / educational"),
+    ("casual", "engine.translate_style.casual"),
+    ("formal", "engine.translate_style.formal"),
+    ("educational", "engine.translate_style.educational"),
 ]
 
 _URL_SUFFIX = {"fa": "fa", "en": "en", "ar": "ar", "tr": "tr", "de": "de",
@@ -196,11 +210,11 @@ class Job:
             if speed:
                 self.speed = speed
             ov = start + (pct / 100.0) * span
-            parts = [f"📥 {pct:.1f}%"]
+            parts = [t("engine.progress.download_percent", pct=pct)]
             if speed:
                 parts.append(speed)
             if eta:
-                parts.append(f"⏳ {eta}")
+                parts.append(t("engine.progress.eta", eta=eta))
             self.report(pct, "  ·  ".join(parts), ov)
         return cb
 
@@ -290,19 +304,20 @@ def transcribe_file(job: Job, api_keys, input_path, out_dir, language="auto",
     """Run the full subtitle pipeline on a local media file. Returns dict of paths."""
     job._check()
     if not api_keys:
-        raise RuntimeError("هیچ کلید API تنظیم نشده؛ اول از تب «تنظیمات» کلید بگذار.")
+        raise RuntimeError(t("engine.err.no_api_keys"))
     if not os.path.exists(input_path):
-        raise RuntimeError(f"فایل ورودی پیدا نشد:\n{input_path}")
+        raise RuntimeError(t("engine.err.input_missing", path=input_path))
     os.makedirs(out_dir, exist_ok=True)
 
     work_dir = os.path.join(config.WORK_DIR, "transcribe",
                             f"{_safe_stem(input_path)}_{time.strftime('%Y%m%d_%H%M%S')}")
     os.makedirs(work_dir, exist_ok=True)
 
-    job.log(f"🎬 فایل ورودی: {input_path}")
-    job.log(f"📁 پوشه‌ی خروجی: {out_dir}")
-    job.log(f"⚙️ موتور: {provider} · زبان: {language} · فرمت: {output_format}")
-    job.report(0, "شروع پردازش…", progress_start + 1)
+    job.log(t("engine.log.input_file", path=input_path))
+    job.log(t("engine.log.out_dir", path=out_dir))
+    job.log(t("engine.log.engine_info", provider=provider, language=language,
+              fmt=output_format))
+    job.report(0, t("engine.progress.start_processing"), progress_start + 1)
 
     progress = _mapped(job, progress_start, progress_span)
     result = transcribe.transcribe_file(
@@ -320,8 +335,8 @@ def transcribe_file(job: Job, api_keys, input_path, out_dir, language="auto",
         final_dir=out_dir,
     )
     for key, path in (result or {}).items():
-        job.log(f"✅ {key.upper()} ساخته شد → {path}")
-    job.report(100, "تمام شد ✅", 100)
+        job.log(t("engine.log.artifact_saved", kind=key.upper(), path=path))
+    job.report(100, t("engine.progress.done"), 100)
     return result
 
 
@@ -334,14 +349,14 @@ def transcribe_youtube(job: Job, api_keys, url, out_dir, language="auto",
     os.makedirs(out_dir, exist_ok=True)
     dl_dir = os.path.join(config.WORK_DIR, "downloads")
     os.makedirs(dl_dir, exist_ok=True)
-    job.log(f"🔗 لینک: {url}")
-    job.report(0, "شروع دانلود صدا از یوتیوب…", 1)
+    job.log(t("engine.log.link", url=url))
+    job.report(0, t("engine.progress.youtube_audio_start"), 1)
 
     audio_path = downloader.download_youtube_audio(
         url, dl_dir, cookies_path=cookie_paths(cookies), use_vpn=False,
         progress=job.dl_progress(start=0, span=15), cancel_event=job.cancel_event)
-    job.log(f"🎧 صدا دانلود شد: {audio_path}")
-    job.report(15, "دانلود صدا تمام شد؛ شروع ساخت زیرنویس…", 16)
+    job.log(t("engine.log.audio_downloaded", path=audio_path))
+    job.report(15, t("engine.progress.audio_ready"), 16)
 
     return transcribe_file(
         job, api_keys, audio_path, out_dir, language=language,
@@ -355,8 +370,8 @@ def download_media(job: Job, url, out_dir, quality="audio", cookies=None):
     """Download audio or video. Returns the local file path."""
     job._check()
     os.makedirs(out_dir, exist_ok=True)
-    job.log(f"⬇️ شروع دانلود (کیفیت: {quality})")
-    job.report(0, "در حال آماده‌سازی دانلود…", 1)
+    job.log(t("engine.log.download_started", quality=quality))
+    job.report(0, t("engine.progress.download_preparing"), 1)
     try:
         if str(quality) == "audio":
             return downloader.download_youtube_audio(
@@ -374,15 +389,15 @@ def download_subtitles(job: Job, url, out_dir, lang=None, cookies=None):
     """Grab YouTube's own (auto/manual) SRT. Returns (path, target, kind, title)."""
     job._check()
     os.makedirs(out_dir, exist_ok=True)
-    job.report(0, "در حال گرفتن زیرنویس یوتیوب…", 1)
+    job.report(0, t("engine.progress.subtitle_fetch"), 1)
     try:
         path, target, kind, title = downloader.download_youtube_subtitle(
             url, out_dir, lang=lang, cookies_path=cookie_paths(cookies),
             use_vpn=False, progress=job.dl_progress())
     except downloader.DownloadCancelled as exc:
         raise Cancelled() from exc
-    job.log(f"📝 زبان: {target} · نوع: {kind}")
-    job.report(100, "زیرنویس دریافت شد ✅", 100)
+    job.log(t("engine.log.subtitle_info", target=target, kind=kind))
+    job.report(100, t("engine.progress.subtitle_ready"), 100)
     return path, target, kind, title
 
 
@@ -390,14 +405,14 @@ def download_info_txt(job: Job, url, out_dir, cookies=None):
     """Export title / metadata / description as .txt. Returns (path, title)."""
     job._check()
     os.makedirs(out_dir, exist_ok=True)
-    job.report(0, "در حال خواندن مشخصات ویدیو…", 1)
+    job.report(0, t("engine.progress.info_reading"), 1)
     try:
         path, title = downloader.download_youtube_info_txt(
             url, out_dir, cookies_path=cookie_paths(cookies), use_vpn=False,
             progress=job.dl_progress())
     except downloader.DownloadCancelled as exc:
         raise Cancelled() from exc
-    job.report(100, "فایل مشخصات ساخته شد ✅", 100)
+    job.report(100, t("engine.progress.info_saved"), 100)
     return path, title
 
 
@@ -421,17 +436,18 @@ def translate_srt_file(job: Job, srt_path, out_dir, target_language="Persian",
     job._check()
     keys = gemini_keys_list or gemini_keys()
     if not keys:
-        raise RuntimeError("هیچ کلید Gemini تنظیم نشده؛ اول از تب «تنظیمات» کلید بگذار.")
+        raise RuntimeError(t("engine.err.no_gemini_keys"))
     if not os.path.exists(srt_path):
-        raise RuntimeError(f"فایل SRT پیدا نشد:\n{srt_path}")
+        raise RuntimeError(t("engine.err.srt_missing", path=srt_path))
 
     with open(srt_path, encoding="utf-8", errors="ignore") as f:
         srt_text = f.read()
     items = translate.parse_srt(srt_text)
     if not items:
-        raise RuntimeError("این فایل SRT معتبر نیست (هیچ خط زمانی پیدا نشد).")
-    job.log(f"📄 {len(items)} خط زیرنویس · {len(keys)} کلید Gemini · مقصد: {target_language}")
-    job.report(0, "شروع ترجمه…", 1)
+        raise RuntimeError(t("engine.err.srt_invalid"))
+    job.log(t("engine.log.translate_start", lines=len(items), keys=len(keys),
+              target=target_language))
+    job.report(0, t("engine.progress.translate_start"), 1)
 
     def progress(pct, label):
         # Reserve the last percent for writing the file.
@@ -449,8 +465,8 @@ def translate_srt_file(job: Job, srt_path, out_dir, target_language="Persian",
     out_path = os.path.join(out_dir, f"{base}_{suffix}.srt")
     with open(out_path, "w", encoding="utf-8") as f:
         f.write(out_text)
-    job.log(f"✅ ترجمه ذخیره شد → {out_path}")
-    job.report(100, "ترجمه تمام شد ✅", 100)
+    job.log(t("engine.log.translation_saved", path=out_path))
+    job.report(100, t("engine.progress.translate_done"), 100)
     return out_path
 
 
@@ -461,21 +477,21 @@ def test_api_key(provider, key):
     import requests
     key = (key or "").strip()
     if not key:
-        return False, "کلید خالی است."
+        return False, t("engine.err.empty_key")
     try:
         if provider == "groq":
             r = requests.get("https://api.groq.com/openai/v1/models",
                              headers={"Authorization": f"Bearer {key}"}, timeout=25)
             if r.status_code == 200:
-                return True, "✅ کلید Groq سالم است."
-            return False, f"❌ Groq: HTTP {r.status_code} — {r.text[:200]}"
+                return True, t("engine.key.groq_ok")
+            return False, t("engine.key.groq_http", code=r.status_code, body=r.text[:200])
         r = requests.get("https://generativelanguage.googleapis.com/v1beta/models",
                          params={"key": key}, timeout=25)
         if r.status_code == 200:
             names = [m.get("name", "") for m in (r.json().get("models") or [])]
             has_flash = any("flash" in n for n in names)
-            extra = "" if has_flash else " (هیچ مدل flash در دسترس نیست)"
-            return True, f"✅ کلید Gemini سالم است{extra}."
-        return False, f"❌ Gemini: HTTP {r.status_code} — {r.text[:200]}"
+            extra = "" if has_flash else t("engine.key.no_flash")
+            return True, t("engine.key.gemini_ok", extra=extra)
+        return False, t("engine.key.gemini_http", code=r.status_code, body=r.text[:200])
     except Exception as exc:
-        return False, f"❌ خطای شبکه: {exc}"
+        return False, t("engine.key.network_error", error=exc)

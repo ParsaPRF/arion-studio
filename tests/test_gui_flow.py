@@ -108,9 +108,13 @@ class GuiFlowTests(unittest.TestCase):
         self.msgbox.errors.clear()
         self.msgbox.warnings.clear()
 
-    @staticmethod
-    def _label(pairs, code):
-        return {c: lbl for c, lbl in pairs}[code]
+    def _t(self, key, **kwargs):
+        """Current-language text for a catalog key."""
+        return self.main.t(key, **kwargs)
+
+    def _label(self, pairs, code):
+        """Display label for an engine constant entry (codes -> t(key))."""
+        return self.main.t({c: key for c, key in pairs}[code])
 
     def tearDown(self):
         for name, fn in self._saved.items():
@@ -150,7 +154,7 @@ class GuiFlowTests(unittest.TestCase):
         tab = self.app.tabs["transcribe"]
         self.app.show("transcribe")
         self.app.settings["transcribe_source"] = "file"
-        tab.seg.set("📁 فایل محلی")
+        tab.seg.set(self._t("ui.seg.local_file"))
         tab.path_var.set(self.dummy_media)
         tab.cookie_var.set("")
         tab.lang_menu.set(self._label(self.main.engine.LANGUAGES, "fa"))
@@ -172,9 +176,9 @@ class GuiFlowTests(unittest.TestCase):
         self.assertEqual(call["args"][2], self.dummy_media)   # input path
         self.assertEqual(call["args"][3], expected_out)
         self.assertTrue(self.msgbox.infos, "success was never reported to the user")
-        self.assertIn("زیرنویس ساخته شد", str(self.msgbox.infos[-1]))
-        self.assertIn("تمام شد", tab.status_lbl.cget("text"))
-        self.assertIn("فایل‌های ساخته‌شده", self._log_text(tab))
+        self.assertIn("Subtitles created", str(self.msgbox.infos[-1]))
+        self.assertIn("Done", tab.status_lbl.cget("text"))
+        self.assertIn("Files written", self._log_text(tab))
         self.assertEqual(tab.percent_lbl.cget("text"), "100.0%")
         self.assertFalse(self.msgbox.errors, self.msgbox.errors)
 
@@ -183,7 +187,7 @@ class GuiFlowTests(unittest.TestCase):
         self.main.engine.groq_keys = lambda *a, **k: []
         self.app.settings["groq_key"] = ""
         self.app.settings["transcribe_source"] = "file"
-        tab.seg.set("📁 فایل محلی")
+        tab.seg.set(self._t("ui.seg.local_file"))
         tab.path_var.set(self.dummy_media)
         tab.trigger_start()
         self.app.update()
@@ -194,7 +198,7 @@ class GuiFlowTests(unittest.TestCase):
     def test_transcribe_missing_file_is_reported(self):
         tab = self.app.tabs["transcribe"]
         self.app.settings["transcribe_source"] = "file"
-        tab.seg.set("📁 فایل محلی")
+        tab.seg.set(self._t("ui.seg.local_file"))
         tab.path_var.set(os.path.join(self.tmp, "nope.mp4"))
         tab.trigger_start()
         self.app.update()
@@ -204,7 +208,7 @@ class GuiFlowTests(unittest.TestCase):
     def test_youtube_transcribe_flow(self):
         tab = self.app.tabs["transcribe"]
         self.app.settings["transcribe_source"] = "url"
-        tab.seg.set("📺 لینک یوتیوب")
+        tab.seg.set(self._t("ui.seg.youtube_link"))
         tab.url_var.set("https://www.youtube.com/watch?v=abc123")
         tab.prov_menu.set(self._label(self.main.engine.PROVIDERS, "gemini"))
         tab._sync_deep()
@@ -253,13 +257,13 @@ class GuiFlowTests(unittest.TestCase):
         tab = self.app.tabs["download"]
         tab.url_var.set("https://youtu.be/abc123")
         tab._set_kind("subs")
-        tab.quality_menu.set("🇩🇪 آلمانی")
+        tab.quality_menu.set(self._t("ui.lang.de"))
         path = os.path.join(self.tmp, "sub.de.srt")
         self._stub("download_subtitles", (path, "de", "manual", "Titel"))
         tab.trigger_start()
         self._settle(tab)
         self.assertEqual(self.calls["download_subtitles"]["kwargs"]["lang"], "de")
-        self.assertIn("زیرنویس", self._log_text(tab))
+        self.assertIn("Subtitle", self._log_text(tab))
 
     def test_download_info_txt_flow(self):
         tab = self.app.tabs["download"]
@@ -283,8 +287,7 @@ class GuiFlowTests(unittest.TestCase):
         tab = self.app.tabs["translate"]
         self.app.show("translate")
         tab.srt_var.set(self.dummy_srt)
-        tab.lang_menu.set([lbl for _, lbl, _ in
-                           self.main.engine.TRANSLATE_LANGUAGES][2])
+        tab.lang_menu.set(self._t(self.main.engine.TRANSLATE_LANGUAGES[2][1]))
         out = os.path.join(self.tmp, "in_de.srt")
         self._stub("translate_srt_file", out)
         tab.trigger_start()
@@ -293,13 +296,13 @@ class GuiFlowTests(unittest.TestCase):
         self.assertEqual(call["args"][1], self.dummy_srt)
         self.assertEqual(call["kwargs"]["gemini_keys_list"], ["gem-key"])
         self.assertTrue(call["kwargs"]["target_language"])
-        self.assertIn("ترجمه", self._log_text(tab))
+        self.assertIn("Translat", self._log_text(tab))
 
     # -- failure + cancel ----------------------------------------------------
     def test_engine_error_is_shown_and_unlocks_ui(self):
         tab = self.app.tabs["transcribe"]
         self.app.settings["transcribe_source"] = "file"
-        tab.seg.set("📁 فایل محلی")
+        tab.seg.set(self._t("ui.seg.local_file"))
         tab.path_var.set(self.dummy_media)
 
         def boom(*a, **k):
@@ -316,7 +319,7 @@ class GuiFlowTests(unittest.TestCase):
     def test_cancel_path_unlocks_ui(self):
         tab = self.app.tabs["transcribe"]
         self.app.settings["transcribe_source"] = "file"
-        tab.seg.set("📁 فایل محلی")
+        tab.seg.set(self._t("ui.seg.local_file"))
         tab.path_var.set(self.dummy_media)
 
         def cancellable(job, *a, **k):
@@ -328,7 +331,7 @@ class GuiFlowTests(unittest.TestCase):
         self.main.engine.transcribe_file = cancellable
         tab.trigger_start()
         self._settle(tab)
-        self.assertIn("لغو", self._log_text(tab))
+        self.assertIn("cancelled", self._log_text(tab))
         self.assertEqual(tab.start_btn.cget("state"), "normal")
 
     # -- misc UI paths -------------------------------------------------------
@@ -368,7 +371,7 @@ class GuiFlowTests(unittest.TestCase):
         self.assertEqual(self.app.settings["groq_key"], "gsk_test_key")
         self.assertEqual(self.app.settings["gemini_key"], "AIza_test_key")
         self.assertTrue(os.path.isdir(os.path.join(self.tmp, "out2")))
-        self.assertIn("ذخیره", self._log_text(tab))
+        self.assertIn("saved", self._log_text(tab))
 
     def test_shortcut_dispatch_on_real_widgets(self):
         from tests.test_ui_logic import FakeEvent

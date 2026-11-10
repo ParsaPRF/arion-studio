@@ -96,12 +96,18 @@ class FakeEvent:
 
 
 class DurationTests(unittest.TestCase):
-    def test_format(self):
-        self.assertEqual(main.fmt_duration(12), "12 ثانیه")
+    def test_format_in_the_default_language(self):
+        """A fresh install shows English (and Persian when asked for)."""
+        main.i18n.set_language("en")
+        self.assertEqual(main.fmt_duration(12), "12 seconds")
         self.assertEqual(main.fmt_duration(65), "1:05")
         self.assertEqual(main.fmt_duration(3725), "1:02:05")
         self.assertEqual(main.fmt_duration("bad"), "—")
+        self.assertEqual(main.fmt_duration(-5), "0 seconds")
+        main.i18n.set_language("fa")
+        self.assertEqual(main.fmt_duration(12), "12 ثانیه")
         self.assertEqual(main.fmt_duration(-5), "0 ثانیه")
+        main.i18n.set_language(main.i18n.DEFAULT_LANGUAGE)
 
 
 class KeyResolutionTests(unittest.TestCase):
