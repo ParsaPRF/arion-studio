@@ -102,7 +102,7 @@ class GuiFlowTests(unittest.TestCase):
             "download_info_txt", "translate_srt_file")}
         m.engine.groq_keys = lambda *a, **k: ["groq-key"]
         m.engine.gemini_keys = lambda *a, **k: ["gem-key"]
-        m.engine.environment_status = lambda: {
+        m.engine.environment_status = lambda *a, **k: {
             "ffmpeg": True, "ytdlp": True, "work_dir": self.tmp,
             "keys_groq": 1, "keys_gemini": 1}
         self.msgbox.infos.clear()
@@ -492,6 +492,82 @@ class GuiFlowTests(unittest.TestCase):
         self.assertIsNotNone(saved, "a normal window must be saveable")
         app._on_close()
         self.assertIsNotNone(self.main.load_settings().get("geometry"))
+
+    # -- settings: API keys and documentation links --------------------------
+    def _settings_tab(self):
+        self.app.show("settings")
+        self._pump(0.05)
+        return self.app.tabs["settings"]
+
+    def test_settings_saves_a_typed_key(self):
+        tab = self._settings_tab()
+        tab.groq_var.set("gsk_typed_by_hand")
+        tab._save()
+        self.assertEqual(self.app.settings["groq_key"], "gsk_typed_by_hand")
+        with open(self.main.SETTINGS_PATH, encoding="utf-8") as handle:
+            self.assertEqual(json.load(handle)["groq_key"], "gsk_typed_by_hand")
+        # The field clears, and its hint now says a key is stored.
+        self.assertEqual(tab.groq_var.get(), "")
+        self.assertEqual(tab.groq_entry.cget("placeholder_text"),
+                         self._t("ui.placeholder.key_saved"))
+
+    def test_settings_keeps_a_key_even_if_the_mask_is_still_in_the_field(self):
+        # Regression: the field used to be pre-filled with bullets, so a key
+        # typed after them was discarded while the dialog still said "saved".
+        tab = self._settings_tab()
+        tab.groq_var.set("\u2022" * 8 + "gsk_survives_the_mask")
+        tab._save()
+        self.assertEqual(self.app.settings["groq_key"], "gsk_survives_the_mask")
+
+    def test_settings_does_not_invent_a_key_from_an_empty_field(self):
+        tab = self._settings_tab()
+        self.app.settings["groq_key"] = "gsk_already_there"
+        tab.groq_var.set("")
+        tab._save()
+        self.assertEqual(self.app.settings["groq_key"], "gsk_already_there")
+
+    def test_saved_key_reaches_the_engine(self):
+        tab = self._settings_tab()
+        tab.groq_var.set("gsk_engine_sees_me")
+        tab._save()
+        real_groq_keys = self._saved["groq_keys"]
+        self.assertEqual(real_groq_keys(self.app.settings["groq_key"]),
+                         ["gsk_engine_sees_me"])
+
+    def test_settings_links_call_the_url_opener(self):
+        tab = self._settings_tab()
+        opened = []
+        original = self.main.open_url
+        self.main.open_url = lambda url: (opened.append(url), True)[1]
+        try:
+            tab._open_link("https://console.groq.com/keys")
+        finally:
+            self.main.open_url = original
+        self.assertEqual(opened, ["https://console.groq.com/keys"])
+
+    def test_settings_link_failure_shows_the_url_instead_of_nothing(self):
+        tab = self._settings_tab()
+        original = self.main.open_url
+        self.main.open_url = lambda url: False
+        try:
+            tab._open_link("https://example.test/some-key-page")
+        finally:
+            self.main.open_url = original
+        self.assertTrue(self.msgbox.warnings, "a failed link must say something")
+        message = str(self.msgbox.warnings[-1][-1])
+        self.assertIn("https://example.test/some-key-page", message)
+        self.assertIn("https://example.test/some-key-page", self._log_text(tab))
+
+    def test_status_line_counts_the_saved_key(self):
+        # Regression: environment_status() used to count only the key pool, so
+        # the settings page kept saying "Groq: 0" after a key was saved.
+        real_status = self._saved["environment_status"]
+        status = real_status("gsk_counted_here", "")
+        self.assertGreaterEqual(status["keys_groq"], 1)
+
+    def test_open_url_rejects_an_empty_url(self):
+        self.assertFalse(self.main.open_url(""))
+        self.assertFalse(self.main.open_url("   "))
 
 
 if __name__ == "__main__":

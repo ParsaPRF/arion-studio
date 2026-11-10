@@ -283,15 +283,21 @@ def _safe_stem(path):
 
 # --- Environment checks -------------------------------------------------------
 
-def environment_status():
-    """Facts the GUI shows in its log/settings: ffmpeg, yt-dlp, folders."""
+def environment_status(groq_key=None, gemini_key=None):
+    """Facts the GUI shows in its log/settings: ffmpeg, yt-dlp, folders.
+
+    The keys saved in settings.json are passed in so the counts describe what
+    the app will actually use.  Counting only the pool and the .env default made
+    the settings page print "Groq: 0" right after a key was saved, which read as
+    "my key was not saved".
+    """
     from core import audio as audio_mod
     return {
         "ffmpeg": audio_mod.available(),
         "ytdlp": downloader.ytdlp_available(),
         "work_dir": config.WORK_DIR,
-        "keys_groq": len(groq_keys()),
-        "keys_gemini": len(gemini_keys()),
+        "keys_groq": len(groq_keys(groq_key)),
+        "keys_gemini": len(gemini_keys(gemini_key)),
     }
 
 

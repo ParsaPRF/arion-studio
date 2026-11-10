@@ -342,6 +342,45 @@ def make_textbox(parent, **kwargs):
     return widget
 
 
+def open_url(url):
+    """Open ``url`` in the user's browser and report whether that worked.
+
+    ``webbrowser.open`` can return False (or raise) when no handler is
+    registered, and on Windows the shell's own launcher is the most reliable
+    route, so try both before giving up.  Callers show the link when this
+    returns False instead of leaving the click silent.
+    """
+    url = (url or "").strip()
+    if not url:
+        return False
+    if sys.platform.startswith("win"):
+        try:
+            os.startfile(url)          # the same thing Explorer does
+            return True
+        except Exception:
+            pass
+    try:
+        if webbrowser.open_new_tab(url):
+            return True
+    except Exception:
+        pass
+    try:
+        webbrowser.open(url)
+        return True
+    except Exception:
+        pass
+    if not sys.platform.startswith("win"):
+        opener = "open" if sys.platform == "darwin" else "xdg-open"
+        try:
+            subprocess.Popen([opener, url],
+                             stdout=subprocess.DEVNULL,
+                             stderr=subprocess.DEVNULL)
+            return True
+        except Exception:
+            pass
+    return False
+
+
 def wrap_text(widget, text):
     """Insert into a (possibly disabled) CTkTextbox without flicker."""
     try:
@@ -1444,10 +1483,14 @@ class SettingsTab(Tab):
         # keys
         ctk.CTkLabel(body, text=t("ui.label.groq_key"), font=F(12)).grid(
             row=1, column=0, sticky="w", padx=12, pady=3)
-        self.groq_var = tk.StringVar(value="•" * 8 if app.settings.get("groq_key") else "")
+        # Start empty even when a key is stored: the bullets are only a
+        # placeholder hint, so whatever the user types is the bare key.  A value
+        # that began with bullets used to be thrown away by _save() without any
+        # feedback - the "it does not save my API key" symptom.
+        self.groq_var = tk.StringVar(value="")
         self.groq_entry = make_entry(
             body, textvariable=self.groq_var, show="•",
-            placeholder_text=t("ui.placeholder.groq_key"))
+            placeholder_text=self._key_placeholder("groq_key"))
         self.groq_entry.grid(row=1, column=1, sticky="ew", padx=6, pady=3)
         ctk.CTkButton(body, text=t("ui.btn.test"), width=52, height=26, font=F(11),
                       command=lambda: self._test_key("groq", self.groq_var.get())
@@ -1455,10 +1498,10 @@ class SettingsTab(Tab):
 
         ctk.CTkLabel(body, text=t("ui.label.gemini_key"), font=F(12)).grid(
             row=2, column=0, sticky="w", padx=12, pady=3)
-        self.gem_var = tk.StringVar(value="•" * 8 if app.settings.get("gemini_key") else "")
+        self.gem_var = tk.StringVar(value="")
         self.gem_entry = make_entry(
             body, textvariable=self.gem_var, show="•",
-            placeholder_text=t("ui.placeholder.gemini_key"))
+            placeholder_text=self._key_placeholder("gemini_key"))
         self.gem_entry.grid(row=2, column=1, sticky="ew", padx=6, pady=3)
         ctk.CTkButton(body, text=t("ui.btn.test"), width=52, height=26, font=F(11),
                       command=lambda: self._test_key("gemini", self.gem_var.get())
@@ -1532,7 +1575,7 @@ class SettingsTab(Tab):
             ctk.CTkButton(guide, text=text, height=28, anchor="w", font=F(11),
                           fg_color="transparent", hover_color=("#ddd", "#333"),
                           text_color=("#1f6feb", "#8ab4f8"),
-                          command=lambda u=url: webbrowser.open(u)).grid(
+                          command=lambda u=url: self._open_link(u)).grid(
                 row=1 + i, column=0, sticky="ew", padx=10, pady=1)
 
         # log for feedback (so self.log works here too)
@@ -1553,7 +1596,9 @@ class SettingsTab(Tab):
     # ---- actions -----------------------------------------------------------
     def refresh_env(self):
         try:
-            status = engine.environment_status()
+            status = engine.environment_status(
+                self.app.settings.get("groq_key"),
+                self.app.settings.get("gemini_key"))
         except Exception as exc:
             self.env_lbl.configure(text=t("ui.err.env_check_failed", v1=exc))
             return
@@ -1573,14 +1618,36 @@ class SettingsTab(Tab):
         if path:
             self.cookie_var.set(path)
 
+    def _key_placeholder(self, setting):
+        """Hint for a key field: bullets once stored, otherwise the format."""
+        if self.app.settings.get(setting):
+            return t("ui.placeholder.key_saved")
+        return t("ui.placeholder.groq_key" if setting == "groq_key"
+                 else "ui.placeholder.gemini_key")
+
+    def _open_link(self, url):
+        """Open a documentation link, and say so if the browser refuses."""
+        if open_url(url):
+            return
+        message = t("ui.err.link_failed", v1=url)
+        self.log(message)
+        mb.showwarning(APP_NAME, message, parent=self)
+
     def _save(self):
         s = self.app.settings
-        groq = self.groq_var.get().strip()
-        gem = self.gem_var.get().strip()
-        if groq and not groq.startswith("•"):
-            s["groq_key"] = groq
-        if gem and not gem.startswith("•"):
-            s["gemini_key"] = gem
+        # An entry that still holds the old bullet mask is treated as "leave it
+        # alone"; anything else is the key the user just typed, leading bullets
+        # included if a stale mask got pasted in.
+        for var, entry, setting in ((self.groq_var, self.groq_entry, "groq_key"),
+                                    (self.gem_var, self.gem_entry, "gemini_key")):
+            value = (var.get() or "").strip().lstrip("•").strip()
+            if value:
+                s[setting] = value
+                var.set("")
+            try:
+                entry.configure(placeholder_text=self._key_placeholder(setting))
+            except Exception:
+                pass
         s["save_keys"] = bool(self.save_keys_var.get())
         if s["save_keys"]:
             for provider, key in (("groq", s.get("groq_key")),
@@ -2120,7 +2187,8 @@ class App(ctk.CTk):
 
     def _startup_checks(self):
         try:
-            status = engine.environment_status()
+            status = engine.environment_status(
+                self.settings.get("groq_key"), self.settings.get("gemini_key"))
         except Exception:
             return
         tab = self.tabs.get("transcribe")

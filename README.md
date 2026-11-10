@@ -148,7 +148,7 @@ arion-studio/
 ### 🧪 Tests
 
 ```bash
-python -m unittest discover -s tests -v      # 83 tests: progress parsing, SRT, pipeline, shortcuts, GUI wiring
+python -m unittest discover -s tests -v      # 91 tests: progress parsing, SRT, pipeline, shortcuts, GUI wiring
 ```
 
 They run offline (no API keys, no network). The audio part needs `ffmpeg`, and the GUI-wiring tests run only when `customtkinter` is installed (otherwise they are skipped). Manual, network-touching checks live in `tests/_smoke_*.py`.
@@ -315,7 +315,7 @@ arion-studio/
 ### 🧪 تست‌ها
 
 ```bash
-python -m unittest discover -s tests -v      # ۸۳ تست: پارس پیشرفت، SRT، خط لوله، میان‌برها، سیم‌کشی GUI
+python -m unittest discover -s tests -v      # ۹۱ تست: پارس پیشرفت، SRT، خط لوله، میان‌برها، سیم‌کشی GUI
 ```
 
 تست‌ها آفلاین اجرا می‌شوند (به کلید API و شبکه نیاز ندارند). بخش صوتی به `ffmpeg` نیاز دارد و تست‌های «سیم‌کشی GUI» فقط وقتی `customtkinter` نصب باشد اجرا می‌شوند (وگرنه skip). اسکریپت‌های بررسی دستی با شبکه در `tests/_smoke_*.py` هستند.
