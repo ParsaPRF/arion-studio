@@ -151,6 +151,66 @@ class GuiFlowTests(unittest.TestCase):
         return inner.get("1.0", "end-1c") if inner else ""
 
     # -- transcription -------------------------------------------------------
+    def _prepare_transcribe_file(self):
+        tab = self.app.tabs["transcribe"]
+        self.app.show("transcribe")
+        self.app.settings["transcribe_source"] = "file"
+        tab.seg.set(self._t("ui.seg.local_file"))
+        tab.path_var.set(self.dummy_media)
+        tab.cookie_var.set("")
+        tab.lang_menu.set(self._label(self.main.engine.LANGUAGES, "fa"))
+        return tab
+
+    def test_gemini_only_key_is_used_for_a_file_transcription(self):
+        # Regression: the file branch always handed engine.transcribe_file the
+        # *Groq* list, so a user with only a Gemini key got "no API key".
+        self.main.engine.groq_keys = lambda *a, **k: []
+        self.main.engine.gemini_keys = lambda *a, **k: ["gem-key"]
+        tab = self._prepare_transcribe_file()
+        tab.prov_menu.set(self._label(self.main.engine.PROVIDERS, "gemini"))
+        self._stub("transcribe_file", {"srt": os.path.join(self.tmp, "g.srt")})
+
+        tab.trigger_start()
+        self._settle(tab)
+
+        self.assertFalse(self.msgbox.errors, "a saved Gemini key was rejected")
+        call = self.calls.get("transcribe_file")
+        self.assertIsNotNone(call, "engine.transcribe_file was never called")
+        self.assertEqual(call["args"][1], ["gem-key"])
+        self.assertEqual(call["kwargs"]["provider"], "gemini")
+
+    def test_groq_only_key_still_works_for_the_groq_engine(self):
+        self.main.engine.gemini_keys = lambda *a, **k: []
+        self.main.engine.groq_keys = lambda *a, **k: ["groq-key"]
+        tab = self._prepare_transcribe_file()
+        tab.prov_menu.set(self._label(self.main.engine.PROVIDERS, "groq"))
+        self._stub("transcribe_file", {"srt": os.path.join(self.tmp, "g.srt")})
+
+        tab.trigger_start()
+        self._settle(tab)
+
+        self.assertFalse(self.msgbox.errors, "a saved Groq key was rejected")
+        self.assertEqual(self.calls["transcribe_file"]["args"][1], ["groq-key"])
+
+    def test_wrong_engine_with_one_key_says_what_to_do(self):
+        # Only a Groq key, but the engine selector is on Gemini: the message
+        # must name the missing key *and* point at the selector.
+        self.main.engine.gemini_keys = lambda *a, **k: []
+        tab = self._prepare_transcribe_file()
+        tab.prov_menu.set(self._label(self.main.engine.PROVIDERS, "gemini"))
+        self._stub("transcribe_file", {"srt": os.path.join(self.tmp, "g.srt")})
+
+        tab.trigger_start()
+        self._settle(tab)
+
+        self.assertIsNone(self.calls.get("transcribe_file"))
+        self.assertTrue(self.msgbox.errors, "no explanation was shown")
+        text = str(self.msgbox.errors[-1][-1])
+        self.assertIn("Gemini", text)
+        self.assertIn("Groq", text, "the message should point at the other engine")
+        self.assertGreater(len(text), 60,
+                           "the message should explain the alternative, not just refuse")
+
     def test_transcribe_file_flow(self):
         tab = self.app.tabs["transcribe"]
         self.app.show("transcribe")

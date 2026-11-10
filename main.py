@@ -1037,6 +1037,10 @@ class TranscribeTab(Tab):
 
         groq = engine.groq_keys(self.app.settings.get("groq_key"))
         gem = engine.gemini_keys(self.app.settings.get("gemini_key"))
+        # The keys of the engine the user picked: every source needs these, not
+        # the Groq ones by default.  Passing the Groq list to a Gemini job made
+        # a Gemini-only user hit "no API key" with a valid key saved.
+        keys = gem if prov == "gemini" else groq
         if prov == "groq" and not groq:
             mb.showerror(APP_NAME, t("ui.err.need_groq_key"),
                          parent=self)
@@ -1058,10 +1062,9 @@ class TranscribeTab(Tab):
         def work():
             if payload[0] == "file":
                 return engine.transcribe_file(
-                    job, groq, payload[1], out_dir, language=lang_code,
+                    job, keys, payload[1], out_dir, language=lang_code,
                     output_format=fmt, style=style_code, provider=prov,
                     deep=deep, refine_keys=gem, cookies=cookies)
-            keys = gem if prov == "gemini" else groq
             return engine.transcribe_youtube(
                 job, keys, payload[1], out_dir, language=lang_code,
                 output_format=fmt, style=style_code, provider=prov,
